@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Maya Simulator</title>
+  <meta name="description" content="A tilt-to-steer driving game. Dodge the deer!">
+  <meta name="theme-color" content="#1b1430">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Maya Sim">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+<div id="app">
+  <canvas id="game"></canvas>
+  <canvas id="crack"></canvas>
+  <div id="vignette"></div>
+  <div id="touch"></div>
+
+  <div id="hud" class="hidden">
+    <div class="hud-top">
+      <div class="hud-score">
+        <div id="hud-score" class="big">0</div>
+        <div id="hud-sub" class="sub"></div>
+      </div>
+      <div id="hud-mid" class="hud-mid"></div>
+      <div class="hud-btns">
+        <button id="btn-radio" class="round hidden" aria-label="Change radio station">📻</button>
+        <button id="btn-pause" class="round" aria-label="Pause">❚❚</button>
+      </div>
+    </div>
+    <div id="pedal-l" class="pedal left"><span class="tilt-only">BRAKE</span><span class="touch-only">◀ DRAG TO STEER ▶</span></div>
+    <div id="pedal-r" class="pedal right">GAS</div>
+    <div id="pedal-brake2" class="pedal right2 touch-only">BRAKE</div>
+    <button id="btn-horn" class="horn" aria-label="Honk">HONK</button>
+  </div>
+
+  <div id="toasts"></div>
+  <div id="pop"></div>
+
+  <section id="s-title" class="screen">
+    <div class="title-wrap">
+      <div class="title-left">
+        <canvas id="t-sign" width="256" height="256"></canvas>
+        <h1 class="logo">MAYA<br>SIMULATOR</h1>
+        <div class="edition">HR-V Edition</div>
+      </div>
+      <div class="title-right">
+        <div class="mode-name" id="t-mode"></div>
+        <div class="mode-desc" id="t-desc"></div>
+        <button id="btn-start" class="btn primary">START DRIVING</button>
+        <button id="btn-modes" class="btn secondary hidden">Change game mode</button>
+        <div class="row-small"><span id="t-best"></span><button id="btn-sound" class="link"></button></div>
+        <div class="howto" id="t-howto"></div>
+        <div class="tip hidden" id="t-a2hs">Tip: tap Share → <b>Add to Home Screen</b> to play full-screen</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-calib" class="screen hidden">
+    <div class="calib">
+      <div class="calib-phone">📱</div>
+      <div class="calib-text" id="c-text">Hold your phone sideways like a steering wheel</div>
+      <div class="calib-count" id="c-count">3</div>
+      <div class="calib-sub">Hold steady — this angle will be "straight"</div>
+    </div>
+  </section>
+
+  <section id="s-pause" class="screen hidden">
+    <div class="card">
+      <h2>PAUSED</h2>
+      <button id="btn-resume" class="btn primary">RESUME</button>
+      <button id="btn-recenter" class="btn secondary">Recenter steering</button>
+      <div class="sens-row"><span>Tilt sensitivity</span>
+        <div id="p-sens" class="seg"><button data-v="0">Low</button><button data-v="1">Med</button><button data-v="2">High</button></div>
+      </div>
+      <div class="row-small"><button id="p-sound" class="link">Sound: On</button><button id="btn-quit" class="link">Quit to menu</button></div>
+    </div>
+  </section>
+
+  <section id="s-over" class="screen hidden">
+    <div class="card over">
+      <h2 id="o-title"></h2>
+      <div class="over-grid">
+        <div class="over-score">
+          <div class="label">SCORE</div>
+          <div id="o-score" class="score"></div>
+          <div id="o-best" class="best"></div>
+        </div>
+        <div id="o-stats" class="stats"></div>
+      </div>
+      <div id="o-quip" class="quip"></div>
+      <div id="o-unlock" class="unlock hidden">🎉 New modes unlocked: <b>Chill Cruise</b> &amp; <b>Deer Revenge</b>!</div>
+      <div class="btn-row">
+        <button id="btn-again" class="btn primary">DRIVE AGAIN</button>
+        <button id="btn-o-modes" class="btn secondary hidden">Change game mode</button>
+        <button id="btn-o-menu" class="btn link">Menu</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-modes" class="screen hidden">
+    <div class="modes-wrap">
+      <h2>PICK A MODE</h2>
+      <div id="m-list" class="m-list"></div>
+      <button id="btn-m-back" class="btn link">Back</button>
+    </div>
+  </section>
+
+  <section id="s-rotate" class="hidden">
+    <div class="rotate-phone">📱</div>
+    <div>Turn your phone sideways</div>
+    <div class="rotate-tip">Not rotating? Swipe down from the top-right corner and turn off <b>Portrait Orientation Lock</b> 🔒</div>
+  </section>
+
+  <div id="loading"><div class="spinner"></div><div id="loading-text">Warming up the HR-V…</div></div>
+  <div id="err" class="hidden"></div>
+</div>
+</body>
+</html>
