@@ -31,7 +31,9 @@ export class PlayerCar {
     const inp = p.input;
     const v0 = this.v;
     let v = this.v;
-    if (inp.brake > 0) v -= 9.5 * inp.brake * dt;
+    // coast: [a, b] = a wreck rolling/sliding to a halt, decelerating by a + b*v
+    if (p.coast) v = Math.max(0, v - (p.coast[0] + p.coast[1] * v) * dt);
+    else if (inp.brake > 0) v -= 9.5 * inp.brake * dt;
     else if (inp.throttle > 0) v += this.accel(v, p.vmax) * inp.throttle * dt;
     else if (v < p.cruise) v += Math.min(3.0 * dt, p.cruise - v);
     else v -= Math.min((0.6 + v * 0.03) * dt, v - p.cruise);

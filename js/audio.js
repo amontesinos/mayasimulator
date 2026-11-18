@@ -284,6 +284,15 @@ export class AudioEngine {
     }
   }
 
+  // Cartoon "ding" for the deer twinkling out in the sky.
+  twinkle() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone('sine', 2093, t, 0.25, 0.14);
+    this._tone('sine', 3136, t + 0.07, 0.35, 0.1);
+    this._tone('triangle', 4186, t + 0.12, 0.3, 0.05);
+  }
+
   // Metal-and-glass impact right before the explosion.
   crunch() {
     if (!this.ctx) return;

@@ -1,9 +1,42 @@
-// Crash explosion: an exterior HR-V model (white, then charred), a fireball,
+// Crash explosion: an exterior Honda model (white, then charred), a fireball,
 // smoke, sparks, flying debris, and a burning wreck. Particles are instanced
 // camera-facing quads (one draw call per system, no point-size limits).
 import * as THREE from '../vendor/three.module.min.js';
 import { part, merge, mat } from './geo.js';
 import { rand } from './util.js';
+import { makeCanvas, canvasTexture } from './textures.js';
+
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+const ZERO = new THREE.Vector3();
+
+// Four-point sparkle with a soft glow, for the "ding!" twinkle.
+function makeTwinkleTexture() {
+  const [c, g] = makeCanvas(128, 128);
+  const glow = g.createRadialGradient(64, 64, 0, 64, 64, 44);
+  glow.addColorStop(0, 'rgba(255,255,240,1)');
+  glow.addColorStop(0.3, 'rgba(255,240,170,0.55)');
+  glow.addColorStop(1, 'rgba(255,220,120,0)');
+  g.fillStyle = glow;
+  g.fillRect(0, 0, 128, 128);
+  const star = (len, w) => {
+    g.beginPath();
+    g.moveTo(64, 64 - len);
+    g.quadraticCurveTo(64 + w, 64 - w, 64 + len, 64);
+    g.quadraticCurveTo(64 + w, 64 + w, 64, 64 + len);
+    g.quadraticCurveTo(64 - w, 64 + w, 64 - len, 64);
+    g.quadraticCurveTo(64 - w, 64 - w, 64, 64 - len);
+    g.fill();
+  };
+  g.fillStyle = '#fffbe6';
+  star(62, 6);
+  g.globalAlpha = 0.6;
+  g.translate(64, 64);
+  g.rotate(Math.PI / 4);
+  g.translate(-64, -64);
+  star(34, 4);
+  return canvasTexture(c);
+}
 
 const PVS = /* glsl */ `
 attribute vec3 iOffset;
@@ -121,7 +154,7 @@ class Particles {
   }
 }
 
-// --- exterior HR-V (crossover silhouette), car-local: forward = -z, ground = y 0
+// --- exterior Honda (crossover silhouette), car-local: forward = -z, ground = y 0
 function sideProfile(points) {
   const s = new THREE.Shape();
   s.moveTo(points[0][0], points[0][1]);
@@ -186,12 +219,20 @@ export class CrashFX {
     this.vcMat = new THREE.MeshLambertMaterial({ vertexColors: true });
     this.lightMat = new THREE.MeshBasicMaterial({ vertexColors: true });
     this.deadLightMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+    // wreck = group at the car's center; the model hangs 0.8 m below so it rolls about its middle
     this.wreck = new THREE.Group();
+    const inner = new THREE.Group();
+    inner.position.y = -0.8;
+    this.wreck.add(inner);
     this.wreckBody = new THREE.Mesh(G.paint, this.paintMat);
     this.wreckLights = new THREE.Mesh(G.lights, this.lightMat);
-    this.wreck.add(this.wreckBody, new THREE.Mesh(G.glass, this.vcMat), new THREE.Mesh(G.black, this.vcMat), new THREE.Mesh(G.silver, this.vcMat), this.wreckLights);
+    inner.add(this.wreckBody, new THREE.Mesh(G.glass, this.vcMat), new THREE.Mesh(G.black, this.vcMat), new THREE.Mesh(G.silver, this.vcMat), this.wreckLights);
     this.wreck.visible = false;
     world.scene.add(this.wreck);
+    this.qYaw = new THREE.Quaternion();
+    this.qRoll = new THREE.Quaternion();
+    this.twinkleT = -1;
+    this.twinkleSprite = null;
     this.debris = [];
     this.debrisGeos = {
       panel: new THREE.BoxGeometry(1, 0.045, 1),
@@ -214,25 +255,46 @@ export class CrashFX {
     this.debris = [];
     this.burning = false;
     this.world.fireLight.intensity = 0;
+    this.twinkleT = -1;
+    if (this.twinkleSprite) this.twinkleSprite.visible = false;
   }
 
-  // Show the (still white) exterior car where the player crashed.
-  placeWreck(rig, groundY) {
+  // Show the (still white) exterior car where the player crashed. From then on
+  // syncWreck() keeps it riding on the (still rolling) car, plus its own hop,
+  // barrel roll and spin.
+  placeWreck(rig) {
     this.reset();
-    this.wreck.position.copy(rig.position);
-    this.wreck.quaternion.copy(rig.quaternion);
     this.wreck.visible = true;
     this.wreckBody.material = this.paintMat;
     this.wreckLights.material = this.lightMat;
-    this.groundY = groundY;
+    this.lift = 0;
     this.vy = 0;
-    this.spinX = 0;
-    this.spinZ = 0;
+    this.airborne = false;
+    this.roll = 0;
+    this.rollTarget = 0;
+    this.spinRoll = 0;
+    this.yawOff = 0;
+    this.spinYaw = 0;
+    this.syncWreck(rig);
   }
 
-  explode() {
+  syncWreck(rig) {
+    const w = this.wreck;
+    // keep the lowest corner on the ground for the current roll angle
+    const rest = 0.87 * Math.abs(Math.sin(this.roll)) + 0.8 * Math.abs(Math.cos(this.roll));
+    w.position.copy(rig.position);
+    w.position.y += rest + this.lift;
+    this.qYaw.setFromAxisAngle(AXIS_Y, this.yawOff);
+    this.qRoll.setFromAxisAngle(AXIS_Z, this.roll);
+    w.quaternion.copy(rig.quaternion).multiply(this.qYaw).multiply(this.qRoll);
+    this.ground = rig.position.y;
+  }
+
+  // carVel: the car's world velocity at the moment of the blast (pieces keep it).
+  explode(carVel) {
     const c = this.tmp.copy(this.wreck.position);
-    c.y += 0.9;
+    const iv = carVel || ZERO;
+    this.debrisGround = this.ground;
     const rv = () => {
       const u = rand(Math.random, -1, 1), th = rand(Math.random, 0, Math.PI * 2);
       const r = Math.sqrt(1 - u * u);
@@ -240,17 +302,17 @@ export class CrashFX {
     };
     for (let i = 0; i < 80; i++) {
       const [x, y, z] = rv(), sp = rand(Math.random, 3, 11);
-      this.fire.add({ x: c.x + x * 0.6, y: c.y + y * 0.4, z: c.z + z * 0.6, vx: x * sp, vy: y * sp + 2, vz: z * sp, age: 0, life: rand(Math.random, 0.6, 1.4), s0: rand(Math.random, 1.4, 2.8), s1: rand(Math.random, 3.5, 6.5), rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -2, 2), drag: 2.6, g: 1.5, colors: FLAME, a0: 0.95, fade: 1.4 });
+      this.fire.add({ x: c.x + x * 0.6, y: c.y + y * 0.4, z: c.z + z * 0.6, vx: x * sp + iv.x * 0.6, vy: y * sp + 2, vz: z * sp + iv.z * 0.6, age: 0, life: rand(Math.random, 0.6, 1.4), s0: rand(Math.random, 1.4, 2.8), s1: rand(Math.random, 3.5, 6.5), rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -2, 2), drag: 2.6, g: 1.5, colors: FLAME, a0: 0.95, fade: 1.4 });
     }
     for (let i = 0; i < 40; i++) {
       const [x, y, z] = rv(), sp = rand(Math.random, 1.5, 6);
-      this.smoke.add({ x: c.x + x, y: c.y + y * 0.6, z: c.z + z, vx: x * sp, vy: y * sp + 1, vz: z * sp, age: 0, life: rand(Math.random, 2.2, 3.8), s0: rand(Math.random, 2, 3), s1: rand(Math.random, 6, 10), rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -0.6, 0.6), drag: 1.4, g: 1.2, colors: SMOKE, a0: 0.6, fade: 1.3 });
+      this.smoke.add({ x: c.x + x, y: c.y + y * 0.6, z: c.z + z, vx: x * sp + iv.x * 0.4, vy: y * sp + 1, vz: z * sp + iv.z * 0.4, age: 0, life: rand(Math.random, 2.2, 3.8), s0: rand(Math.random, 2, 3), s1: rand(Math.random, 6, 10), rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -0.6, 0.6), drag: 1.4, g: 1.2, colors: SMOKE, a0: 0.6, fade: 1.3 });
     }
     for (let i = 0; i < 70; i++) {
       const [x, y, z] = rv(), sp = rand(Math.random, 9, 20);
-      this.sparks.add({ x: c.x, y: c.y, z: c.z, vx: x * sp, vy: y * sp + 3, vz: z * sp, age: 0, life: rand(Math.random, 0.8, 1.6), s0: rand(Math.random, 0.25, 0.4), s1: 0.06, rot: 0, vr: 0, drag: 0.4, g: -14, colors: SPARK, a0: 1, fade: 0.6 });
+      this.sparks.add({ x: c.x, y: c.y, z: c.z, vx: x * sp + iv.x * 0.5, vy: y * sp + 3, vz: z * sp + iv.z * 0.5, age: 0, life: rand(Math.random, 0.8, 1.6), s0: rand(Math.random, 0.25, 0.4), s1: 0.06, rot: 0, vr: 0, drag: 0.4, g: -14, colors: SPARK, a0: 1, fade: 0.6 });
     }
-    // flying pieces of HR-V
+    // flying pieces of the car
     // half = resting height above the ground once the piece settles
     const spawn = (geo, material, sx, sy, sz, half) => {
       const m = new THREE.Mesh(geo, material);
@@ -258,7 +320,7 @@ export class CrashFX {
       m.position.copy(c).add(new THREE.Vector3(rand(Math.random, -0.6, 0.6), rand(Math.random, -0.3, 0.5), rand(Math.random, -1.2, 1.2)));
       const [x, y, z] = rv(), sp = rand(Math.random, 5, 13);
       this.world.scene.add(m);
-      this.debris.push({ mesh: m, v: new THREE.Vector3(x * sp, y * sp + rand(Math.random, 3, 7), z * sp), w: new THREE.Vector3(rand(Math.random, -9, 9), rand(Math.random, -9, 9), rand(Math.random, -9, 9)), half, bounces: 0 });
+      this.debris.push({ mesh: m, v: new THREE.Vector3(x * sp + iv.x * 0.8, y * sp + rand(Math.random, 3, 7), z * sp + iv.z * 0.8), w: new THREE.Vector3(rand(Math.random, -9, 9), rand(Math.random, -9, 9), rand(Math.random, -9, 9)), half, bounces: 0 });
     };
     for (let i = 0; i < 6; i++) spawn(this.debrisGeos.panel, this.whiteMat, rand(Math.random, 0.5, 1.0), 1, rand(Math.random, 0.4, 0.8), 0.03);
     spawn(this.debrisGeos.door, this.whiteMat, 1, 1, 1, 0.04);
@@ -268,12 +330,16 @@ export class CrashFX {
       const s = rand(Math.random, 0.2, 0.45);
       spawn(this.debrisGeos.chunk, this.charMat, s, s * 0.7, s, s * 0.35);
     }
-    // the car itself gets blown into the air and comes down charred
+    // The car is blown into the air and does a barrel roll timed to land squarely
+    // on its roof (or all the way around onto its wheels), then spins as it slides.
     this.wreckBody.material = this.charMat;
     this.wreckLights.material = this.deadLightMat;
     this.vy = 7.5;
-    this.spinX = rand(Math.random, -1.4, 1.4);
-    this.spinZ = rand(Math.random, -2.2, 2.2);
+    this.airborne = true;
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    this.rollTarget = dir * (Math.random() < 0.7 ? Math.PI : Math.PI * 2);
+    this.spinRoll = this.rollTarget / ((2 * this.vy) / 18);
+    this.spinYaw = (Math.random() < 0.5 ? -1 : 1) * rand(Math.random, 1.6, 3.2);
     this.burning = true;
     this.burnT = 0;
     this.fireAcc = 0;
@@ -283,24 +349,54 @@ export class CrashFX {
     fl.intensity = 260;
   }
 
+  // A little cartoon "ding" star where something disappeared into the distance.
+  twinkle(pos, camPos) {
+    if (!this.twinkleSprite) {
+      this.twinkleSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeTwinkleTexture(), blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, fog: false, transparent: true,
+      }));
+      this.twinkleSprite.renderOrder = 20;
+      this.world.scene.add(this.twinkleSprite);
+    }
+    this.twinkleSprite.position.copy(pos);
+    this.twinkleDist = pos.distanceTo(camPos);
+    this.twinkleT = 0;
+    this.twinkleSprite.visible = true;
+  }
+
   update(dt) {
     const w = this.wreck;
-    if (w.visible && (this.vy !== 0 || w.position.y > this.groundY + 0.001)) {
-      this.vy -= 18 * dt;
-      w.position.y += this.vy * dt;
-      w.rotateX(this.spinX * dt);
-      w.rotateZ(this.spinZ * dt);
-      if (w.position.y <= this.groundY) {
-        w.position.y = this.groundY;
-        if (Math.abs(this.vy) > 3) {
-          this.vy = -this.vy * 0.3;
-          this.spinX *= 0.4;
-          this.spinZ *= 0.4;
-        } else {
-          this.vy = 0;
-          this.spinX = 0;
-          this.spinZ = 0;
+    if (w.visible) {
+      if (this.airborne) {
+        this.vy -= 18 * dt;
+        this.lift += this.vy * dt;
+        if (this.spinRoll) this.roll += this.spinRoll * dt;
+        if (this.lift <= 0) {
+          this.lift = 0;
+          if (this.spinRoll) {
+            this.roll = this.rollTarget; // land squarely
+            this.spinRoll = 0;
+          }
+          if (this.vy < -3) this.vy = -this.vy * 0.28;
+          else {
+            this.vy = 0;
+            this.airborne = false;
+          }
         }
+      }
+      this.yawOff += this.spinYaw * dt;
+      if (!this.airborne) this.spinYaw *= Math.exp(-1.3 * dt);
+    }
+    if (this.twinkleT >= 0) {
+      this.twinkleT += dt;
+      const k = this.twinkleT / 0.8;
+      if (k >= 1) {
+        this.twinkleT = -1;
+        this.twinkleSprite.visible = false;
+      } else {
+        const s = Math.pow(Math.sin(k * Math.PI), 0.8) * this.twinkleDist * 0.085;
+        this.twinkleSprite.scale.set(s, s, 1);
+        this.twinkleSprite.material.rotation = k * 2.5;
       }
     }
     if (this.burning) {
@@ -308,18 +404,18 @@ export class CrashFX {
       const rate = this.burnT < 6 ? 55 : 25;
       this.fireAcc += dt * rate;
       this.smokeAcc += dt * 11;
-      const p = w.position;
+      const p = w.position; // the car's center, which keeps moving while it slides
       while (this.fireAcc >= 1) {
         this.fireAcc -= 1;
-        this.fire.add({ x: p.x + rand(Math.random, -0.8, 0.8), y: p.y + rand(Math.random, 0.5, 1.2), z: p.z + rand(Math.random, -1.5, 1.5), vx: rand(Math.random, -0.4, 0.4), vy: rand(Math.random, 1.6, 3.4), vz: rand(Math.random, -0.4, 0.4), age: 0, life: rand(Math.random, 0.55, 1.0), s0: rand(Math.random, 1.3, 2.3), s1: 0.45, rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -3, 3), drag: 1, g: 2, colors: FLAME, a0: 0.92, fade: 0.9 });
-        if (Math.random() < 0.15) this.sparks.add({ x: p.x + rand(Math.random, -0.6, 0.6), y: p.y + 1.2, z: p.z + rand(Math.random, -1, 1), vx: rand(Math.random, -1, 1), vy: rand(Math.random, 3, 6), vz: rand(Math.random, -1, 1), age: 0, life: rand(Math.random, 0.8, 1.5), s0: 0.12, s1: 0.04, rot: 0, vr: 0, drag: 0.8, g: -2, colors: SPARK, a0: 1, fade: 0.7 });
+        this.fire.add({ x: p.x + rand(Math.random, -0.8, 0.8), y: p.y + rand(Math.random, -0.2, 0.5), z: p.z + rand(Math.random, -1.5, 1.5), vx: rand(Math.random, -0.4, 0.4), vy: rand(Math.random, 1.6, 3.4), vz: rand(Math.random, -0.4, 0.4), age: 0, life: rand(Math.random, 0.55, 1.0), s0: rand(Math.random, 1.3, 2.3), s1: 0.45, rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -3, 3), drag: 1, g: 2, colors: FLAME, a0: 0.92, fade: 0.9 });
+        if (Math.random() < 0.15) this.sparks.add({ x: p.x + rand(Math.random, -0.6, 0.6), y: p.y + 0.4, z: p.z + rand(Math.random, -1, 1), vx: rand(Math.random, -1, 1), vy: rand(Math.random, 3, 6), vz: rand(Math.random, -1, 1), age: 0, life: rand(Math.random, 0.8, 1.5), s0: 0.12, s1: 0.04, rot: 0, vr: 0, drag: 0.8, g: -2, colors: SPARK, a0: 1, fade: 0.7 });
       }
       while (this.smokeAcc >= 1) {
         this.smokeAcc -= 1;
-        this.smoke.add({ x: p.x + rand(Math.random, -0.6, 0.6), y: p.y + 2.4, z: p.z + rand(Math.random, -0.8, 0.8), vx: rand(Math.random, -0.5, 0.5), vy: rand(Math.random, 1.8, 3), vz: rand(Math.random, -0.5, 0.5), age: 0, life: rand(Math.random, 2.5, 4), s0: 1.2, s1: rand(Math.random, 4.5, 7), rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -0.5, 0.5), drag: 0.6, g: 0.6, colors: SMOKE, a0: 0.45, fade: 1.2 });
+        this.smoke.add({ x: p.x + rand(Math.random, -0.6, 0.6), y: p.y + 1.6, z: p.z + rand(Math.random, -0.8, 0.8), vx: rand(Math.random, -0.5, 0.5), vy: rand(Math.random, 1.8, 3), vz: rand(Math.random, -0.5, 0.5), age: 0, life: rand(Math.random, 2.5, 4), s0: 1.2, s1: rand(Math.random, 4.5, 7), rot: rand(Math.random, 0, 6.28), vr: rand(Math.random, -0.5, 0.5), drag: 0.6, g: 0.6, colors: SMOKE, a0: 0.45, fade: 1.2 });
       }
       const fl = this.world.fireLight;
-      fl.position.set(p.x, p.y + 1.6, p.z);
+      fl.position.set(p.x, p.y + 0.8, p.z);
       fl.intensity = (this.burnT < 0.25 ? 260 : 70) * (0.75 + 0.25 * Math.sin(this.burnT * 23) * Math.sin(this.burnT * 7.3));
     }
     for (const d of this.debris) {
@@ -329,8 +425,8 @@ export class CrashFX {
       d.mesh.rotation.x += d.w.x * dt;
       d.mesh.rotation.y += d.w.y * dt;
       d.mesh.rotation.z += d.w.z * dt;
-      if (d.mesh.position.y < this.groundY + d.half) {
-        d.mesh.position.y = this.groundY + d.half;
+      if (d.mesh.position.y < this.debrisGround + d.half) {
+        d.mesh.position.y = this.debrisGround + d.half;
         d.v.y = -d.v.y * 0.35;
         d.v.x *= 0.55;
         d.v.z *= 0.55;

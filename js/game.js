@@ -41,8 +41,9 @@ export class Game {
     this.boom = null;
     this.tmpV2 = new THREE.Vector3();
     this.tmpV3 = new THREE.Vector3();
-    this.camFrom = new THREE.Vector3();
-    this.lookFrom = new THREE.Vector3();
+    this.tmpV4 = new THREE.Vector3();
+    this.tmpV5 = new THREE.Vector3();
+    this.carVel = new THREE.Vector3();
     this.rig = new THREE.Object3D();
     this.rig.rotation.order = 'YXZ';
     this.eye = new THREE.Vector3(-CAR_X, 1.2, 0.12);
@@ -50,7 +51,8 @@ export class Game {
     this.camFwd = new THREE.Vector3(0, 0, -1);
     this.tmpV = new THREE.Vector3();
     this.tmpQ = new THREE.Quaternion();
-    this.flipQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+    // mirror camera: face backward, tilted up a little to show more sky
+    this.flipQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(2.5 * DEG, Math.PI, 0, 'YXZ'));
     this.state = 'boot';
     this.time = 0;
     this.frame = 0;
@@ -188,18 +190,17 @@ export class Game {
     this.input.active = false;
     this.input.clearTouches();
     if (reason === 'bonk' || reason === 'crash') {
-      this.boom = { exploded: false };
-      this.car.v = 0;
+      this.boom = { exploded: false, stopT: null };
+      // The car keeps its momentum: it rolls on, explodes, and slides to a halt.
+      if (reason === 'crash') {
+        this.car.v *= 0.55;
+        this.car.rel = (Math.sign(this.car.d) || 1) * 0.3; // glance off, back toward the road
+      } else this.car.v *= 0.85;
       this.audio.crunch();
       this.shake = 0.9;
       this.ui.crack.clear();
-      this.boomS = this.car.s;
-      this.boomD = this.car.d;
-      this.boomY = this.world.heightAt(this.car.s, this.car.d);
-      this.fx.placeWreck(this.rig, this.rig.position.y);
+      this.fx.placeWreck(this.rig);
       // pull the camera out of the driver's seat to watch the car
-      this.camFrom.copy(this.camera.position);
-      this.lookFrom.copy(this.camera.position).addScaledVector(this.camFwd, 12);
       this.camMode = 'chase';
       this.camT = 0;
     } else this.audio.snort();
@@ -314,14 +315,14 @@ export class Game {
     const st = this.state;
     if (st === 'paused' || st === 'boot') return;
     const car = this.car, M = this.mode;
-    const wrecked = this.camMode === 'chase'; // the car is a burning wreck: keep it put
+    const wrecked = this.camMode === 'chase'; // crashed: the car coasts, then slides to a halt
     let input, params;
     if (st === 'playing') {
       input = this.input;
       params = M.carParams();
     } else if (wrecked) {
-      input = { steer: 0, throttle: 0, brake: 1 };
-      params = { cruise: 0, vmax: 50 };
+      input = { steer: 0, throttle: 0, brake: 0 };
+      params = { cruise: 0, vmax: 50, coast: this.boom && this.boom.exploded ? [4, 0.25] : [2.5, 0.15] };
     } else if (st === 'ending' || st === 'over') {
       input = { steer: car.autopilot(this.road, car.d, 0).steer, throttle: 0, brake: st === 'over' ? 1 : 0.7 };
       params = { cruise: 0, vmax: 50 };
@@ -349,7 +350,13 @@ export class Game {
       this.endT += dt;
       if (this.boom && !this.boom.exploded && this.endT > 0.55) this.detonate();
       if (M.ending) M.ending(dt, this.endT);
-      if (this.endT > (this.endReason === 'caught' ? 3.6 : 4.2)) this.showGameOver();
+      let endAt = 3.6;
+      if (this.boom) {
+        // game over once the wreck has slid to a stop (and the deer has twinkled)
+        if (this.boom.exploded && this.boom.stopT == null && car.v < 0.25) this.boom.stopT = this.endT;
+        endAt = this.boom.stopT != null ? Math.max(4.2, this.boom.stopT + 1.3) : 7.5;
+      }
+      if (this.endT > Math.min(endAt, 7.5)) this.showGameOver();
     } else if (st === 'calib') this.updateCalib(dt);
     // re-check: the countdown may have just started the run this frame
     const s2 = this.state;
@@ -393,7 +400,8 @@ export class Game {
   // KABOOM: fireball, debris, charred wreck.
   detonate() {
     this.boom.exploded = true;
-    this.fx.explode();
+    const vel = this.carVel.set(0, 0, -1).applyQuaternion(this.rig.quaternion).multiplyScalar(this.car.v);
+    this.fx.explode(vel);
     this.audio.explosion();
     this.ui.clearToasts();
     this.ui.flash();
@@ -403,18 +411,23 @@ export class Game {
     this.world.headlight.intensity = 0;
   }
 
-  // Camera that rises out of the car and backs away to watch it blow up.
+  // Camera that rises out of the car and backs away to watch it blow up,
+  // following the wreck as it slides to a halt.
   _chaseCam(dt) {
     this.camT += dt;
     const k = easeOut(this.camT / 0.6);
     const drift = Math.max(0, this.camT - 0.6);
-    const sC = this.boomS - 7.5 - drift * 0.35;
-    const dC = this.boomD * 0.35 + Math.sin(drift * 0.4) * 1.5;
+    const car = this.car;
+    const sC = car.s - 7.5 - drift * 0.35;
+    const dC = car.d * 0.35 + Math.sin(drift * 0.4) * 1.5;
     if (!this._tmpP) this._tmpP = { x: 0, z: 0 };
     this.road.toWorld(sC, dC, this._tmpP);
-    const gy = Math.max(this.world.heightAt(sC, dC), this.boomY);
+    const gy = Math.max(this.world.heightAt(sC, dC), this.rig.position.y);
     const chase = this.tmpV2.set(this._tmpP.x, gy + 3.4 + drift * 0.15, this._tmpP.z);
-    const pos = this.tmpV.copy(this.camFrom).lerp(chase, k);
+    // the pull-out starts from the driver's eye, which is still moving with the car
+    const eye = this.tmpV4.copy(this.eye).applyMatrix4(this.rig.matrixWorld);
+    const lookFrom = this.tmpV5.set(0, 0, -1).applyQuaternion(this.rig.quaternion).multiplyScalar(12).add(eye);
+    const pos = this.tmpV.copy(eye).lerp(chase, k);
     pos.y += Math.sin(Math.PI * k) * 1.2;
     this.shake = Math.max(0, this.shake - dt * 1.1);
     const sh = this.shake * this.shake, t = this.time;
@@ -422,8 +435,8 @@ export class Game {
     pos.y += Math.sin(t * 37.1) * sh * 0.25;
     pos.z += Math.sin(t * 33.7) * sh * 0.3;
     const target = this.tmpV3.copy(this.fx.wreck.position);
-    target.y += 0.9;
-    target.lerp(this.lookFrom, 1 - k);
+    target.y += 1.1; // aim a little above the wreck so the sky (and the flying deer) stays in frame
+    target.lerp(lookFrom, 1 - k);
     this.camera.position.copy(pos);
     this.camera.lookAt(target);
     this.camera.updateMatrixWorld();
@@ -441,7 +454,7 @@ export class Game {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.font = 'bold 96px Arial, sans-serif';
-    g.fillText('HR-V', w / 2, h / 2 - 20);
+    g.fillText('HONDA', w / 2, h / 2 - 20);
     g.fillStyle = '#7fd4ff';
     g.font = 'bold 26px Arial, sans-serif';
     const d = new Date();
@@ -461,6 +474,7 @@ export class Game {
     this.rig.rotation.set(pitch + this.bodyPitch, yaw + car.rel, this.bodyRoll);
     this.rig.updateMatrixWorld();
     if (this.camMode === 'chase') {
+      this.fx.syncWreck(this.rig);
       this._chaseCam(dt);
       return;
     }

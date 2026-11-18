@@ -180,6 +180,8 @@ export class Deer {
     this.group.add(this.shadow);
     this.stars = [];
     this.bubble = null;
+    this.flyPos = new THREE.Vector3();
+    this.flyVel = new THREE.Vector3();
     this.reset(0, 0, 0);
   }
 
@@ -202,6 +204,9 @@ export class Deer {
     this.airborne = false;
     this.onLand = null;
     this.locked = false;
+    this.flying = false;
+    this.flyT = 0;
+    this.shadow.visible = true;
     this.hit = false;
     this.passed = false;
     this.counted = false;
@@ -239,8 +244,36 @@ export class Deer {
     this.vy = vy;
   }
 
+  // Cartoon launch: fly in a straight line up and away down the road, spinning.
+  // Uses world coordinates so the flight doesn't bend with the road.
+  blastOff(road, carV) {
+    const yaw = road.sample(this.s).yaw;
+    const fwd = carV + 28;
+    const side = (Math.random() - 0.5) * 6;
+    this.flyPos.copy(this.group.position);
+    this.flyVel.set(-Math.sin(yaw) * fwd + Math.cos(yaw) * side, 4.5, -Math.cos(yaw) * fwd - Math.sin(yaw) * side);
+    this.flyYaw = this.group.rotation.y;
+    this.spin = (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 3);
+    this.flyRoll = (Math.random() < 0.5 ? -1 : 1) * 9;
+    this.flying = true;
+    this.flyT = 0;
+    this.airborne = false;
+    this.onLand = null;
+    this.look = false;
+    this.gait = 'bound'; // legs flail
+    this.shadow.visible = false;
+    this.setState('flying');
+  }
+
   integrate(dt) {
     this.t += dt;
+    if (this.flying) {
+      this.flyT += dt;
+      this.flyPos.addScaledVector(this.flyVel, dt);
+      this.flyYaw += this.spin * dt;
+      this.roll += this.flyRoll * dt;
+      return;
+    }
     const dy = wrapAngle(this.targetYaw - this.rYaw);
     this.rYaw += clamp(dy, -this.turnRate * dt, this.turnRate * dt);
     if (!this.locked) {
@@ -308,6 +341,12 @@ export class Deer {
   }
 
   place(world, camPos) {
+    if (this.flying) {
+      this.group.position.copy(this.flyPos);
+      this.group.rotation.y = this.flyYaw;
+      this.camDist = this.flyPos.distanceTo(camPos);
+      return;
+    }
     const yaw = world.road.toWorld(this.s, this.d, _p);
     const gy = world.heightAt(this.s, this.d);
     this.group.position.set(_p.x, gy + this.y, _p.z);
@@ -321,7 +360,7 @@ export class Deer {
   }
 
   updateEyes(camPos, camFwd, lightsOn) {
-    if (!lightsOn && !this.K.angry) {
+    if (this.flying || (!lightsOn && !this.K.angry)) {
       this.eyeMat.opacity = 0;
       return;
     }

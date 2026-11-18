@@ -1,5 +1,5 @@
 // Game modes. Each mode owns spawning, deer/traffic behavior, scoring, HUD
-// data, and what the HR-V's center touchscreen shows.
+// data, and what the car's center touchscreen shows.
 import { mulberry32, rand, pick, weighted, clamp, fmt, MPH, damp } from './util.js';
 import { randomKind, Deer } from './deer.js';
 import { STATIONS } from './audio.js';
@@ -9,14 +9,15 @@ const CLOSE = ['CLOSE CALL!', 'WHEW!', 'OH DEER!', 'SO CLOSE!', 'NOT TODAY!', 'N
 const BONK_QUIPS = ['RUDE.', 'HEY!!', 'Watch it, lady!', 'I was here first!', 'Unbelievable.', 'Ow. Ow. OW.', 'Not cool!', "You'll hear from my lawyer", 'I had the right of way!'];
 const BUCK_QUIPS = ['My antlers!', 'Do you know who I am?!'];
 const FAWN_QUIPS = ["I'm telling my mom!", 'MOMMM!'];
-const EXCUSE = ['Pardon me!', 'Coming through!', 'Wheee!', "Excuse me, ma'am!", 'Lovely day!', 'Nice HR-V!'];
+const BLAST_QUIPS = ["I'M OKAAAY!", 'WHEEEEE!', 'BYEEEEE!'];
+const EXCUSE = ['Pardon me!', 'Coming through!', 'Wheee!', "Excuse me, ma'am!", 'Lovely day!', 'Nice Honda!'];
 const LEVELS = ['', 'More deer than usual tonight…', 'The deer are getting bolder', 'Rush hour (for deer)', "It's deer o'clock", 'The deer have unionized', 'Absolute deer chaos'];
 const DODGE_OVER = [
   'The deer have filed a formal complaint.',
   'Your insurance agent just sighed audibly.',
   'Somewhere, a deer is telling this story at a party.',
   'The deer would like to see your license and registration.',
-  'Three bonks. One KABOOM. Zero HR-Vs.',
+  'Three bonks. One KABOOM. Zero Hondas.',
   'The Deer Council thanks you for your participation.',
 ];
 const CRASH_TITLES = {
@@ -41,7 +42,7 @@ const REVENGE_OVER = [
   "You've been served. By deer.",
   'The deer would like a word. Several words.',
 ];
-const SHOUTS = ['THERE SHE IS!', 'AFTER HER!', 'WE JUST WANNA TALK!', "PULL OVER, MA'AM!", 'NICE HR-V. SHAME IF SOMETHING HAPPENED TO IT', 'WE HAVE QUESTIONS!'];
+const SHOUTS = ['THERE SHE IS!', 'AFTER HER!', 'WE JUST WANNA TALK!', "PULL OVER, MA'AM!", 'NICE HONDA. SHAME IF SOMETHING HAPPENED TO IT', 'WE HAVE QUESTIONS!'];
 
 const tta = (g, deer) => (deer.s - g.car.s - 2.2) / Math.max(g.car.v, 2);
 const nearestLane = (d, lanes) => lanes.reduce((a, b) => (Math.abs(b - d) < Math.abs(a - d) ? b : a));
@@ -146,6 +147,8 @@ export class DodgeMode {
     this.groupTip = false;
     this.firstTip = false;
     this.offTip = false;
+    this.blasted = null;
+    this.twinkled = false;
     this.cruise = 20;
   }
 
@@ -352,8 +355,18 @@ export class DodgeMode {
       return;
     }
     this.lives--;
-    this.invuln = 2.2;
     this.combo = 0;
+    if (this.lives <= 0) {
+      // Last heart: the deer is launched off into the sky (it's fine!) and the
+      // car keeps rolling and blows up. No BONK pop; the KABOOM is coming.
+      deer.blastOff(g.road, car.v);
+      deer.say(pick(r, BLAST_QUIPS), 1.5);
+      this.blasted = deer;
+      g.audio.bonk();
+      g.endRun('bonk');
+      return;
+    }
+    this.invuln = 2.2;
     car.v *= 0.35;
     deer.vs = car.v + 3.5;
     deer.vd = away * rand(r, 5.5, 8);
@@ -366,17 +379,22 @@ export class DodgeMode {
       deer.say(this.quip(deer), 2.6);
       g.audio.snort();
     };
-    if (this.lives <= 0) {
-      // last heart: no BONK pop, the car is about to explode
-      g.audio.bonk();
-      g.endRun('bonk');
-      return;
-    }
     g.bonkFx(deer.group.position, true);
     if (!g.store.data.tips.honk) {
       g.store.data.tips.honk = true;
       g.store.save();
       setTimeout(() => g.toast('Tip: tap HONK to scare deer off the road', 'tip', 3800), 1600);
+    }
+  }
+
+  // During the crash: once the launched deer is a speck in the sky, it twinkles out.
+  ending() {
+    const d = this.blasted;
+    if (d && !this.twinkled && (d.flyT > 2.3 || d.camDist > 150)) {
+      this.twinkled = true;
+      this.g.fx.twinkle(d.group.position, this.g.camPos);
+      this.g.audio.twinkle();
+      this.g.deer.release(d);
     }
   }
 
@@ -548,7 +566,7 @@ export class ChillMode {
   static theme = 'day';
   static title = 'Chill Cruise';
   static icon = '🌲';
-  static desc = 'No score, no way to lose. Just you, the HR-V, and the radio.';
+  static desc = 'No score, no way to lose. Just you, the Honda, and the radio.';
   static road = { minRadius: 260, maxRadius: 800, turnMin: 0.25, turnMax: 0.9, hillAmp: 9 };
   static crash = false; // no way to lose: the car just bumps off things
 

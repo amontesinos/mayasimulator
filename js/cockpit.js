@@ -1,4 +1,4 @@
-// Driver's-eye interior of a 2016-18 HR-V (stylized). Rendered as a separate
+// Driver's-eye interior of a white Honda crossover (stylized). Rendered as a separate
 // pass on top of the world so it never clips. Coordinates are relative to the
 // driver's eye: x right, y up, -z forward. The car centerline is at x = CAR_X.
 import * as THREE from '../vendor/three.module.min.js';
@@ -42,7 +42,8 @@ export class Cockpit {
     this.scene.add(this.hemi, this.sun, this.sun.target, this.amb);
     this.sunWorld = new THREE.Vector3(0, 1, 0);
     this.mirrorRT = new THREE.WebGLRenderTarget(512, 128);
-    this.mirrorCam = new THREE.PerspectiveCamera(15, 4, 0.5, 700);
+    // far plane must reach the sky dome (r=1900) and mountain rings, like the main camera
+    this.mirrorCam = new THREE.PerspectiveCamera(17, 4, 0.5, 2600);
     this.mirrorCam.rotation.order = 'YXZ';
     this.ecoT = 0;
     this.lastMph = -1;
@@ -82,7 +83,7 @@ export class Cockpit {
     dashGeo.translate(-0.82, 0, 0);
     R.add(new THREE.Mesh(dashGeo, M.dash));
 
-    // passenger-side trim band (the HR-V's long horizontal accent)
+    // passenger-side trim band (a long horizontal accent)
     const trim = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.014, 0.012), M.silver);
     trim.position.set(1.03, -0.322, -0.585);
     R.add(trim);

@@ -1,7 +1,7 @@
-# Maya Simulator — HR-V Edition
+# Maya Simulator — Honda Edition
 
 A first-person, tilt-to-steer driving game that runs in a phone browser. You drive a
-white 2016–18 Honda HR-V from the driver's seat.
+white Honda from the driver's seat.
 
 **Play:** https://amontesinos.github.io/mayasimulator/
 
@@ -9,7 +9,7 @@ white 2016–18 Honda HR-V from the driver's seat.
 
 | Mode | What happens |
 | --- | --- |
-| 🦌 **Deer Dodge** (default) | Endless canyon road at dusk. Deer stand, cross, fake you out, and leap from the trees. Three bonks, or one crash into anything off the road (trees, rocks, posts, signs), and the HR-V goes KABOOM. |
+| 🦌 **Deer Dodge** (default) | Endless canyon road at dusk. Deer stand, cross, fake you out, and leap from the trees. Three bonks, or one crash into anything off the road (trees, rocks, posts, signs), and the Honda goes KABOOM. |
 | 🌲 **Chill Cruise** | Sunny drive with the radio on. No score, no way to lose — the deer always get out of the way and the car just bumps off things. |
 | 😤 **Deer Revenge** | A herd of very angry deer chases you down the interstate. Weave through traffic; don't let them catch up, and don't hit the barrier or guardrail. |
 
@@ -25,7 +25,7 @@ Chill Cruise and Deer Revenge unlock after your first Deer Dodge run (saved on t
 ## How it works
 
 - Plain static site, no build step. [three.js r170](https://threejs.org) is vendored in `vendor/`.
-- Everything is procedural: the road, terrain, trees, deer, the HR-V interior, the canvas
+- Everything is procedural: the road, terrain, trees, deer, the car interior, the canvas
   textures, and all sound (Web Audio synthesis, including two radio stations).
 - Tilt steering converts `deviceorientation` beta/gamma into a gravity vector, rotates it into
   screen space, and steers on the screen's left-right tilt. That avoids the angle jumps raw
@@ -45,7 +45,7 @@ js/input.js           tilt / touch / keyboard controls
 js/car.js             car physics (road-relative coordinates)
 js/road.js            endless procedural road
 js/world.js           sky, terrain chunks, trees, signs, themes
-js/cockpit.js         HR-V interior, gauges, mirror, hands
+js/cockpit.js         car interior, gauges, mirror
 js/deer.js            deer models, animation, eyeshine, speech bubbles
 js/traffic.js         highway traffic
 js/modes.js           Deer Dodge / Chill Cruise / Deer Revenge
