@@ -49,6 +49,11 @@ export class Cockpit {
     this.hoodDeer = null;
     this.tmpV = new THREE.Vector3();
     this.tmpV2 = new THREE.Vector3();
+    this.tmpN = new THREE.Vector3();
+    this.tmpX = new THREE.Vector3();
+    this.tmpY = new THREE.Vector3();
+    this.tmpZ = new THREE.Vector3();
+    this.tmpM = new THREE.Matrix4();
     this._build();
   }
 
@@ -66,9 +71,8 @@ export class Cockpit {
       frit: new THREE.MeshBasicMaterial({ color: 0x0c0c0e }),
       paint: new THREE.MeshPhongMaterial({ color: 0xf5f5f2, specular: 0xbbbbbb, shininess: 90 }),
       black: new THREE.MeshBasicMaterial({ color: 0x050506 }),
-      glove: new THREE.MeshLambertMaterial({ color: 0xe8dfcd }),
-      cuff: new THREE.MeshLambertMaterial({ color: 0xd3c8b1 }),
-      sleeve: new THREE.MeshLambertMaterial({ color: 0x4b5263 }),
+      glove: new THREE.MeshLambertMaterial({ color: 0xe8dfcd, flatShading: true }),
+      sleeve: new THREE.MeshLambertMaterial({ color: 0x4b5263, flatShading: true }),
       sideGlass: new THREE.MeshBasicMaterial({ color: 0x7d8da3 }),
     });
 
@@ -233,50 +237,44 @@ export class Cockpit {
     lower.position.set(0, -0.125, 0);
     spin.add(lower);
 
-    // Gloved hands. Glove-local axes: x = out from the wheel center, y = along
-    // the rim, z = toward the driver. The back of the hand reaches out to the
-    // wrist so the sleeve runs into it with no gap.
-    const ellG = (rx, ry, rz, px, py, pz) => {
-      const g = new THREE.SphereGeometry(1, 14, 10);
+    // Gloved hands. Each hand is re-aimed every frame so it continues straight
+    // out of its forearm (elbow -> wrist -> knuckles), with the knuckles on the
+    // rim at a grip point. Hand-local axes: +y runs along the forearm toward the
+    // knuckles, +z is the back of the hand.
+    const blob = (rx, ry, rz, px, py, pz) => {
+      const g = new THREE.SphereGeometry(1, 10, 8);
       g.scale(rx, ry, rz);
       g.translate(px, py, pz);
       return g;
     };
-    const gloveGeo = [
-      ellG(0.052, 0.052, 0.031, 0.03, 0, 0.022), // back of the hand, over the rim
-      ellG(0.03, 0.05, 0.028, -0.004, 0, -0.02), // fingers curled behind the rim
-      ellG(0.026, 0.047, 0.03, -0.022, 0, 0.004), // palm on the inside of the rim
+    const handGeo = [
+      blob(0.044, 0.06, 0.034, 0, -0.05, 0.004), // back of the hand, wrist end swallows the sleeve
+      blob(0.043, 0.026, 0.027, 0, 0.018, -0.008), // fingers curled over the rim
     ];
-    // Hands turn only part of the way with the wheel (the rim slides through
-    // them) so the arms never sweep across the windshield.
+    // Grip points turn only part of the way with the wheel (the rim slides
+    // through the hands) so the arms never sweep across the windshield.
     const handSpin = new THREE.Group();
     wb.add(handSpin);
     this.handSpin = handSpin;
     this.arms = [];
     for (const [deg, side] of [[163, -1], [17, 1]]) {
       const a = deg * DEG;
-      const glove = new THREE.Group();
-      glove.position.set(Math.cos(a) * 0.185, Math.sin(a) * 0.185, 0.008);
-      glove.rotation.z = a;
-      for (const g of gloveGeo) glove.add(new THREE.Mesh(g, M.glove));
-      const thumb = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), M.glove);
-      thumb.scale.set(0.013, 0.031, 0.014);
-      thumb.position.set(-0.008, side * 0.036, 0.03);
-      thumb.rotation.z = side * 0.6;
-      glove.add(thumb);
-      const wrist = new THREE.Object3D();
-      wrist.position.set(0.072, 0, 0.034); // inside the back-of-hand blob
-      glove.add(wrist);
-      handSpin.add(glove);
-      // forearm: radius 0.031 at the wrist end (y=0), 0.043 at the elbow end (y=1)
-      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.031, 1, 16), M.sleeve);
+      const grip = new THREE.Object3D();
+      grip.position.set(Math.cos(a) * 0.185, Math.sin(a) * 0.185, 0.006);
+      handSpin.add(grip);
+      const hand = new THREE.Group();
+      for (const g of handGeo) hand.add(new THREE.Mesh(g, M.glove));
+      const thumb = new THREE.Mesh(new THREE.SphereGeometry(1, 6, 5), M.glove);
+      thumb.scale.set(0.014, 0.032, 0.014);
+      thumb.position.set(-side * 0.036, -0.035, 0.012); // on the side facing the wheel center
+      thumb.rotation.z = side * 0.5;
+      hand.add(thumb);
+      R.add(hand);
+      // forearm: radius 0.027 at the wrist end (y=0), 0.042 at the elbow end (y=1)
+      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.027, 1, 9), M.sleeve);
       fore.geometry.translate(0, 0.5, 0);
       R.add(fore);
-      // knit cuff straddling the wrist joint
-      const cuffM = new THREE.Mesh(new THREE.CylinderGeometry(0.039, 0.035, 0.075, 16), M.cuff);
-      cuffM.geometry.translate(0, 0.0375, 0);
-      R.add(cuffM);
-      this.arms.push({ wrist, fore, cuff: cuffM, elbow: new THREE.Vector3(side * 0.27, -0.6, -0.2) });
+      this.arms.push({ grip, hand, fore, elbow: new THREE.Vector3(side * 0.27, -0.6, -0.2) });
     }
 
     // --- pillars, headliner, frit band
@@ -533,19 +531,22 @@ export class Cockpit {
     }
     this.warnMesh.visible = !!st.warn && Math.floor(st.time * 7) % 2 === 0;
 
-    // forearms follow the hands
+    // Aim each hand straight along its forearm, knuckles on the rim.
     this.wheelBase.updateMatrixWorld(true);
+    const N = this.tmpN.set(0, 0, 1).transformDirection(this.wheelBase.matrixWorld); // wheel face normal
     for (const arm of this.arms) {
-      const w = arm.wrist.getWorldPosition(this.tmpV);
-      const dir = this.tmpV2.subVectors(arm.elbow, w);
-      const len = dir.length();
-      dir.divideScalar(len);
-      // start the sleeve a little inside the hand so the joint never shows
-      arm.fore.position.copy(w).addScaledVector(dir, -0.025);
-      arm.fore.quaternion.setFromUnitVectors(UP, dir);
-      arm.fore.scale.set(1, len + 0.025, 1);
-      arm.cuff.position.copy(w).addScaledVector(dir, -0.022);
-      arm.cuff.quaternion.copy(arm.fore.quaternion);
+      const G = arm.grip.getWorldPosition(this.tmpV);
+      const Y = this.tmpY.subVectors(G, arm.elbow).normalize();
+      const Z = this.tmpZ.copy(N).addScaledVector(Y, -N.dot(Y)).normalize();
+      const X = this.tmpX.crossVectors(Y, Z);
+      arm.hand.position.copy(G);
+      arm.hand.quaternion.setFromRotationMatrix(this.tmpM.makeBasis(X, Y, Z));
+      // the wrist sits inside the back of the hand, on the same line as the forearm
+      const W = this.tmpV2.copy(G).addScaledVector(Y, -0.085);
+      const len = W.distanceTo(arm.elbow);
+      arm.fore.position.copy(W);
+      arm.fore.quaternion.setFromUnitVectors(UP, this.tmpY.negate());
+      arm.fore.scale.set(1, len, 1);
     }
   }
 }
