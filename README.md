@@ -9,9 +9,9 @@ white 2016–18 Honda HR-V from the driver's seat.
 
 | Mode | What happens |
 | --- | --- |
-| 🦌 **Deer Dodge** (default) | Endless canyon road at dusk. Deer stand, cross, fake you out, and leap from the trees. Three bonks and you're out. |
-| 🌲 **Chill Cruise** | Sunny drive with the radio on. No score, no way to lose — the deer always get out of the way. |
-| 😤 **Deer Revenge** | A herd of very angry deer chases you down the interstate. Weave through traffic; don't let them catch up. |
+| 🦌 **Deer Dodge** (default) | Endless canyon road at dusk. Deer stand, cross, fake you out, and leap from the trees. Three bonks, or one crash into anything off the road (trees, rocks, posts, signs), and the HR-V goes KABOOM. |
+| 🌲 **Chill Cruise** | Sunny drive with the radio on. No score, no way to lose — the deer always get out of the way and the car just bumps off things. |
+| 😤 **Deer Revenge** | A herd of very angry deer chases you down the interstate. Weave through traffic; don't let them catch up, and don't hit the barrier or guardrail. |
 
 Chill Cruise and Deer Revenge unlock after your first Deer Dodge run (saved on the device).
 
