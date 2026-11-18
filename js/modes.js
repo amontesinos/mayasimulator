@@ -16,8 +16,24 @@ const DODGE_OVER = [
   'Your insurance agent just sighed audibly.',
   'Somewhere, a deer is telling this story at a party.',
   'The deer would like to see your license and registration.',
-  'Three bonks. The HR-V has seen things.',
+  'Three bonks. One KABOOM. Zero HR-Vs.',
   'The Deer Council thanks you for your participation.',
+];
+const CRASH_TITLES = {
+  tree: 'THAT WAS A TREE, NOT A DEER',
+  rock: 'THAT WAS A ROCK, NOT A DEER',
+  post: 'THE ROADSIDE POST WINS',
+  sign: 'YOU HIT THE SIGN',
+  forest: 'THE FOREST WINS',
+  barrier: "THE DEER DIDN'T EVEN HAVE TO TRY",
+  guardrail: "THE DEER DIDN'T EVEN HAVE TO TRY",
+};
+const CRASH_QUIPS = [
+  'The deer saw the whole thing.',
+  'Somewhere, a deer is slow-clapping.',
+  'Technically, you avoided the deer.',
+  "In fairness, it didn't move.",
+  'The deer would like it noted that this one was not their fault.',
 ];
 const REVENGE_OVER = [
   'They just wanted to talk. Mostly.',
@@ -103,6 +119,7 @@ export class DodgeMode {
   static icon = '🦌';
   static desc = "Dodge the deer. Don't bonk. Beat your high score.";
   static road = { minRadius: 230, maxRadius: 650, turnMin: 0.25, turnMax: 1.0, hillAmp: 7 };
+  static crash = true; // hitting anything off the road blows up the car
 
   constructor(g) {
     this.g = g;
@@ -128,6 +145,7 @@ export class DodgeMode {
     this.events = 0;
     this.groupTip = false;
     this.firstTip = false;
+    this.offTip = false;
     this.cruise = 20;
   }
 
@@ -348,9 +366,14 @@ export class DodgeMode {
       deer.say(this.quip(deer), 2.6);
       g.audio.snort();
     };
+    if (this.lives <= 0) {
+      // last heart: no BONK pop, the car is about to explode
+      g.audio.bonk();
+      g.endRun('bonk');
+      return;
+    }
     g.bonkFx(deer.group.position, true);
-    if (this.lives <= 0) g.endRun('bonk');
-    else if (!g.store.data.tips.honk) {
+    if (!g.store.data.tips.honk) {
       g.store.data.tips.honk = true;
       g.store.save();
       setTimeout(() => g.toast('Tip: tap HONK to scare deer off the road', 'tip', 3800), 1600);
@@ -386,6 +409,10 @@ export class DodgeMode {
       g.audio.levelUp();
     }
     this.cruise = Math.min(33, 20 + this.level * 1.7);
+    if (!this.offTip && car.offroad > 0.3) {
+      this.offTip = true;
+      g.toast("Careful! Hit anything off the road and it's KABOOM 💥", 'warn', 2800);
+    }
     while (car.s + 230 > this.nextS) {
       this.spawnEvent(this.nextS);
       this.nextS += Math.max(110, 255 - 24 * this.level) + rand(r, 0, 70);
@@ -499,9 +526,10 @@ export class DodgeMode {
   }
 
   results() {
-    const car = this.g.car;
+    const g = this.g, car = g.car;
+    const crashed = g.endReason === 'crash';
     return {
-      title: 'THE DEER WIN THIS ROUND',
+      title: crashed ? CRASH_TITLES[g.crashKind] || 'KABOOM.' : 'THE DEER WIN THIS ROUND',
       score: Math.round(this.score),
       stats: [
         ['Distance', `${((car.s - this.s0) / 1609.34).toFixed(2)} mi`],
@@ -509,7 +537,7 @@ export class DodgeMode {
         ['Close calls', String(this.closeCalls)],
         ['Level', String(this.level + 1)],
       ],
-      quip: pick(this.rng, DODGE_OVER),
+      quip: pick(this.rng, crashed ? CRASH_QUIPS : DODGE_OVER),
     };
   }
 }
@@ -522,6 +550,7 @@ export class ChillMode {
   static icon = '🌲';
   static desc = 'No score, no way to lose. Just you, the HR-V, and the radio.';
   static road = { minRadius: 260, maxRadius: 800, turnMin: 0.25, turnMax: 0.9, hillAmp: 9 };
+  static crash = false; // no way to lose: the car just bumps off things
 
   constructor(g) {
     this.g = g;
@@ -720,6 +749,7 @@ export class RevengeMode {
   static icon = '😤';
   static desc = "The deer want a word with you. Weave through traffic and don't let the herd catch up.";
   static road = { minRadius: 700, maxRadius: 1600, turnMin: 0.15, turnMax: 0.5, hillAmp: 4, straightMin: 150, straightMax: 500 };
+  static crash = true; // the median barrier and guardrail end the run
 
   constructor(g) {
     this.g = g;
@@ -868,7 +898,7 @@ export class RevengeMode {
         deer.rYaw = deer.targetYaw = Math.atan2(-(car.d - deer.d), car.s - deer.s);
       }
     });
-    if (t > 0.9 && !this.hood) {
+    if (g.endReason === 'caught' && t > 0.9 && !this.hood) {
       // One deer hops onto the hood and lowers its head to stare in at you.
       this.hood = new Deer('angry');
       this.hood.model.scale.setScalar(0.85);
@@ -922,9 +952,10 @@ export class RevengeMode {
   }
 
   results() {
-    const car = this.g.car;
+    const g = this.g, car = g.car;
+    const crashed = g.endReason === 'crash';
     return {
-      title: 'THE DEER GOT THEIR REVENGE',
+      title: crashed ? CRASH_TITLES[g.crashKind] || 'KABOOM.' : 'THE DEER GOT THEIR REVENGE',
       score: Math.round(this.score),
       stats: [
         ['Distance', `${((car.s - this.s0) / 1609.34).toFixed(2)} mi`],
@@ -932,7 +963,7 @@ export class RevengeMode {
         ['Fender benders', String(this.bumps)],
         ['Survived', `${Math.round(this.elapsed)} s`],
       ],
-      quip: pick(this.rng, REVENGE_OVER),
+      quip: pick(this.rng, crashed ? ['The herd sends their regards.', "They'll take it.", 'The deer are calling it a win.'] : REVENGE_OVER),
     };
   }
 }

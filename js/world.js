@@ -47,7 +47,7 @@ export const THEMES = {
     headlights: 900,
     signGlow: 0.35,
     terrain: { ditch: 0.35, ditchW: 3.2, riseBase: 0.22, riseVar: 0.14, bumps: 3.0, gravel: 0x7a7066, grassNear: 0x7a7a40, grassFar: 0x4c5530, forest: 0x3c4030 },
-    trees: { perSide: 95, minX: 6.5, maxX: 105, aspen: 0.36, clearing: -0.45, pine: [0x2d4a31, 0x36532f, 0x28412d], aspenCols: [0xe8ae2a, 0xdc8a1f, 0xd2b53a, 0xc1761d] },
+    trees: { perSide: 95, minX: 6.5, maxX: 105, aspen: 0.36, clearing: -0.45, line: [6.6, 8.6, 7.5], pine: [0x2d4a31, 0x36532f, 0x28412d], aspenCols: [0xe8ae2a, 0xdc8a1f, 0xd2b53a, 0xc1761d] },
     mountains: { far: [0x7d5a86, 0xa8728c], near: [0x47384f, 0x6b4a66], snow: false },
     posts: true,
     signs: [['deer', 4], ['speed55', 2], ['joke', 1.5]],
@@ -182,6 +182,9 @@ export class World {
     this.scene.add(this.hemi, this.sun, this.sun.target);
     this.headlight = new THREE.SpotLight(0xfff0d6, 0, 170, 0.5, 0.6, 1.6);
     this.scene.add(this.headlight, this.headlight.target);
+    // Always present (intensity 0 until a crash) so lighting shaders never recompile mid-game.
+    this.fireLight = new THREE.PointLight(0xff7a2a, 0, 45, 1.4);
+    this.scene.add(this.fireLight);
     this.sunDir = new THREE.Vector3(0, 1, 0);
   }
 
@@ -378,6 +381,19 @@ export class World {
     this.headlight.target.position.y -= 1.4;
   }
 
+  // First roadside obstacle overlapping a box centered at (s, d), or null.
+  hitObstacle(s, d, halfL, halfW) {
+    const ci = Math.floor(s / this.chunkLen);
+    for (let c = ci - 1; c <= ci + 1; c++) {
+      const ch = this.chunks.get(c);
+      if (!ch) continue;
+      for (const o of ch.obstacles) {
+        if (Math.abs(o.s - s) < halfL + o.r && Math.abs(o.d - d) < halfW + o.r) return o;
+      }
+    }
+    return null;
+  }
+
   _disposeChunk(ch) {
     for (const g of ch.owned) g.dispose();
     for (const im of ch.instanced) im.dispose();
@@ -389,6 +405,8 @@ export class World {
     const L = this.chunkLen, step = this.step, s0 = ci * L, n = Math.round(L / step);
     const group = new THREE.Group();
     const owned = [], instanced = [];
+    const obstacles = []; // {s, d, r, kind} for anything the car can crash into
+    const reach = 16; // obstacles further than this past the road edge can't be reached
     const tmp = { x: 0, z: 0 };
 
     // --- asphalt
@@ -519,6 +537,20 @@ export class World {
         road.toWorld(s, d, tmp);
         const t = { x: tmp.x, y: this.heightAt(s, d) - 0.15, z: tmp.z, sc, sy: rand(rng, 0.9, 1.15), rot, c: pickCol };
         (isAspen ? aspens : pines).push(t);
+        if (x < reach) obstacles.push({ s, d, r: (isAspen ? 0.4 : 0.9) * sc, kind: 'tree' });
+      }
+      // a tree line just past the ditch, so the forest edge is something you can see and hit
+      if (TR.line) {
+        const [x0, x1, gap] = TR.line;
+        for (let s = s0 + rng() * gap; s < s0 + L; s += gap * rand(rng, 0.7, 1.3)) {
+          const x = rand(rng, x0, x1);
+          const d = side > 0 ? R.right + x : R.left - x;
+          road.toWorld(s, d, tmp);
+          const sc = rand(rng, 0.85, 1.35);
+          const isAspen = rng() < TR.aspen;
+          (isAspen ? aspens : pines).push({ x: tmp.x, y: this.heightAt(s, d) - 0.15, z: tmp.z, sc, sy: rand(rng, 0.9, 1.15), rot: rng() * 6.283, c: rng() });
+          obstacles.push({ s, d, r: (isAspen ? 0.4 : 0.9) * sc, kind: 'tree' });
+        }
       }
       const nRocks = 4 + Math.floor(rng() * 4);
       for (let k = 0; k < nRocks; k++) {
@@ -526,7 +558,9 @@ export class World {
         const x = 3.8 + Math.pow(rng(), 2) * 40;
         const d = side > 0 ? R.right + x : R.left - x;
         road.toWorld(s, d, tmp);
-        rocks.push({ x: tmp.x, y: this.heightAt(s, d) - 0.1, z: tmp.z, sc: rand(rng, 0.35, 1.3), sy: 1, rot: rng() * 6.283, c: rng() });
+        const sc = rand(rng, 0.35, 1.3);
+        rocks.push({ x: tmp.x, y: this.heightAt(s, d) - 0.1, z: tmp.z, sc, sy: 1, rot: rng() * 6.283, c: rng() });
+        if (x < reach) obstacles.push({ s, d, r: 0.85 * sc, kind: 'rock' });
       }
     }
     const dummy = new THREE.Object3D();
@@ -565,6 +599,7 @@ export class World {
           const d = side > 0 ? R.right + 0.7 : R.left - 0.7;
           const yaw = road.toWorld(s, d, tmp);
           posts.push({ x: tmp.x, y: this.heightAt(s, d) - 0.05, z: tmp.z, sc: 1, sy: 1, rot: yaw });
+          obstacles.push({ s, d, r: 0.12, kind: 'post' });
         }
       }
       inst(this.geos.post, this.mats.post, posts);
@@ -602,11 +637,13 @@ export class World {
       }
       if (!key) continue;
       this.lastSignS = sc;
-      this._addSign(group, key, sc, R.right + (T.guardrail ? 2.1 : 1.6));
+      const sd = R.right + (T.guardrail ? 2.1 : 1.6);
+      this._addSign(group, key, sc, sd);
+      obstacles.push({ s: sc, d: sd, r: 0.2, kind: 'sign' });
     }
 
     this.scene.add(group);
-    return { group, owned, instanced };
+    return { group, owned, instanced, obstacles };
   }
 
   _ribbon(s0, n, step, dBase, profile) {

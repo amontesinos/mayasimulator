@@ -7,13 +7,18 @@ import { Cockpit, CAR_X } from './cockpit.js';
 import { PlayerCar } from './car.js';
 import { DeerManager } from './deer.js';
 import { TrafficManager } from './traffic.js';
+import { CrashFX } from './fx.js';
 import { MODES } from './modes.js';
 import { clamp, damp, lerp, MPH, DEG } from './util.js';
 
+// pavedL/R: where off-road slowdown starts. hardL/R: the furthest the car can go
+// (a bounce in Chill Cruise; a crash in the modes where crashing ends the run).
 const LIMITS = {
   twoLane: { pavedL: -4.25, pavedR: 4.25, hardL: -8.2, hardR: 8.2 },
+  twoLaneCrash: { pavedL: -4.25, pavedR: 4.25, hardL: -13.8, hardR: 13.8 },
   highway: { pavedL: -9, pavedR: 9, hardL: -5.95, hardR: 7.95 },
 };
+const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
 
 export class Game {
   constructor({ canvas, ui, input, audio, store }) {
@@ -30,6 +35,14 @@ export class Game {
     this.car = new PlayerCar();
     this.deer = new DeerManager(this.world);
     this.traffic = new TrafficManager(this.world);
+    this.fx = new CrashFX(this.world);
+    this.camMode = 'fp'; // 'fp' = driver's seat, 'chase' = pulled out to watch a crash
+    this.camT = 0;
+    this.boom = null;
+    this.tmpV2 = new THREE.Vector3();
+    this.tmpV3 = new THREE.Vector3();
+    this.camFrom = new THREE.Vector3();
+    this.lookFrom = new THREE.Vector3();
     this.rig = new THREE.Object3D();
     this.rig.rotation.order = 'YXZ';
     this.eye = new THREE.Vector3(-CAR_X, 1.2, 0.12);
@@ -75,13 +88,15 @@ export class Game {
     this.deer.clear();
     this.traffic.clear();
     this.cockpit.setHoodDeer(null);
-    this.cockpit.resetAirbag();
+    this.fx.reset();
+    this.camMode = 'fp';
+    this.boom = null;
     this.ui.crack.clear();
     this.road = new Road({ seed: (Math.random() * 1e6) | 0, ...M.road });
     this.world.reset(theme, this.road);
     this.cockpit.setTheme(theme);
     this.roadSpec = ROADS[theme.road];
-    this.limits = LIMITS[theme.road];
+    this.limits = theme.road === 'highway' ? LIMITS.highway : M.crash ? LIMITS.twoLaneCrash : LIMITS.twoLane;
     this.homeLane = theme.road === 'highway' ? 0 : this.roadSpec.lanes[this.roadSpec.lanes.length - 1];
     this.car.reset(0, this.homeLane, 12);
     this.mode = new M(this);
@@ -147,8 +162,10 @@ export class Game {
     this.ui.show(null);
     this.ui.showHud(true, this.input.mode, this.modeKey);
     this.ui.crack.clear();
-    this.cockpit.resetAirbag();
     this.cockpit.setHoodDeer(null);
+    this.fx.reset();
+    this.camMode = 'fp';
+    this.boom = null;
     this.runS0 = this.car.s;
     this.mode.start();
     this.ui.setHud(this.mode.hud());
@@ -160,17 +177,40 @@ export class Game {
     }
   }
 
-  endRun(reason) {
+  // reason: 'bonk' (last heart lost to a deer), 'crash' (hit something off the
+  // road), or 'caught' (Deer Revenge herd). The first two blow up the car.
+  endRun(reason, kind = null) {
     if (this.state !== 'playing') return;
     this.state = 'ending';
     this.endT = 0;
     this.endReason = reason;
+    this.crashKind = kind;
     this.input.active = false;
     this.input.clearTouches();
-    if (reason === 'bonk') {
-      this.cockpit.deployAirbag();
-      this.audio.airbag();
+    if (reason === 'bonk' || reason === 'crash') {
+      this.boom = { exploded: false };
+      this.car.v = 0;
+      this.audio.crunch();
+      this.shake = 0.9;
+      this.ui.crack.clear();
+      this.boomS = this.car.s;
+      this.boomD = this.car.d;
+      this.boomY = this.world.heightAt(this.car.s, this.car.d);
+      this.fx.placeWreck(this.rig, this.rig.position.y);
+      // pull the camera out of the driver's seat to watch the car
+      this.camFrom.copy(this.camera.position);
+      this.lookFrom.copy(this.camera.position).addScaledVector(this.camFwd, 12);
+      this.camMode = 'chase';
+      this.camT = 0;
     } else this.audio.snort();
+  }
+
+  // Off-road impact: all hearts gone at once.
+  crash(kind) {
+    if (this.state !== 'playing') return;
+    if (this.mode.lives != null) this.mode.lives = 0;
+    this.ui.setHud(this.mode.hud());
+    this.endRun('crash', kind);
   }
 
   showGameOver() {
@@ -274,10 +314,14 @@ export class Game {
     const st = this.state;
     if (st === 'paused' || st === 'boot') return;
     const car = this.car, M = this.mode;
+    const wrecked = this.camMode === 'chase'; // the car is a burning wreck: keep it put
     let input, params;
     if (st === 'playing') {
       input = this.input;
       params = M.carParams();
+    } else if (wrecked) {
+      input = { steer: 0, throttle: 0, brake: 1 };
+      params = { cruise: 0, vmax: 50 };
     } else if (st === 'ending' || st === 'over') {
       input = { steer: car.autopilot(this.road, car.d, 0).steer, throttle: 0, brake: st === 'over' ? 1 : 0.7 };
       params = { cruise: 0, vmax: 50 };
@@ -289,12 +333,23 @@ export class Game {
 
     if (st === 'playing') {
       M.update(dt);
+      // In Deer Dodge and Deer Revenge, hitting anything off the road ends the run.
+      if (this.state === 'playing' && M.constructor.crash) {
+        let kind = null;
+        if (car.scrape) kind = this.roadSpec.lanes.length === 3 ? (car.d < 0 ? 'barrier' : 'guardrail') : 'forest';
+        else {
+          const ob = this.world.hitObstacle(car.s, car.d, 2.1, 0.86);
+          if (ob) kind = ob.kind;
+        }
+        if (kind) this.crash(kind);
+      }
       if (car.scrape && !this.scraping) this.audio.scrape();
       this.scraping = car.scrape > 0;
     } else if (st === 'ending') {
       this.endT += dt;
+      if (this.boom && !this.boom.exploded && this.endT > 0.55) this.detonate();
       if (M.ending) M.ending(dt, this.endT);
-      if (this.endT > (this.endReason === 'caught' ? 3.6 : 2.4)) this.showGameOver();
+      if (this.endT > (this.endReason === 'caught' ? 3.6 : 4.2)) this.showGameOver();
     } else if (st === 'calib') this.updateCalib(dt);
     // re-check: the countdown may have just started the run this frame
     const s2 = this.state;
@@ -304,18 +359,21 @@ export class Game {
     this.deer.update(dt, this.camPos, this.camFwd);
     this.traffic.update(dt, this.roadSpec.lanes);
     this.world.update(car.s, this.camPos, dt);
+    this.fx.update(dt);
 
     const live = st === 'playing' || st === 'ending' || st === 'over';
-    this.cockpit.update(dt, {
-      steer: car.steer,
-      mph: car.v * MPH,
-      rpm: car.rpm,
-      throttle: input.throttle || 0,
-      fuel: clamp(0.8 - ((car.s - this.runS0) / 1609.34) * 0.015, 0.12, 0.8),
-      warn: st === 'playing' && M.warn,
-      time: this.time,
-    });
-    this.cockpit.orientSun(this.tmpQ.copy(this.rig.quaternion).invert());
+    if (this.camMode === 'fp') {
+      this.cockpit.update(dt, {
+        steer: car.steer,
+        mph: car.v * MPH,
+        rpm: car.rpm,
+        throttle: input.throttle || 0,
+        fuel: clamp(0.8 - ((car.s - this.runS0) / 1609.34) * 0.015, 0.12, 0.8),
+        warn: st === 'playing' && M.warn,
+        time: this.time,
+      });
+      this.cockpit.orientSun(this.tmpQ.copy(this.rig.quaternion).invert());
+    }
 
     this.hudT -= dt;
     if (this.hudT <= 0 && (st === 'playing' || st === 'ending')) {
@@ -328,7 +386,49 @@ export class Game {
       this.screenT = 0.15;
       this.cockpit.drawScreen((g, w, h) => (live ? M.drawScreen(g, w, h) : this.drawIdleScreen(g, w, h)));
     }
-    this.audio.setDrive({ rpm: car.rpm, throttle: input.throttle || 0, speed: car.v, offroad: car.offroad > 0 ? 1 : 0, on: true });
+    const engineOn = !(this.boom && this.boom.exploded);
+    this.audio.setDrive({ rpm: car.rpm, throttle: input.throttle || 0, speed: car.v, offroad: car.offroad > 0 ? 1 : 0, on: engineOn });
+  }
+
+  // KABOOM: fireball, debris, charred wreck.
+  detonate() {
+    this.boom.exploded = true;
+    this.fx.explode();
+    this.audio.explosion();
+    this.ui.clearToasts();
+    this.ui.flash();
+    this.ui.pop('KABOOM!', 'boom');
+    this.ui.showHud(false);
+    this.shake = 1.3;
+    this.world.headlight.intensity = 0;
+  }
+
+  // Camera that rises out of the car and backs away to watch it blow up.
+  _chaseCam(dt) {
+    this.camT += dt;
+    const k = easeOut(this.camT / 0.6);
+    const drift = Math.max(0, this.camT - 0.6);
+    const sC = this.boomS - 7.5 - drift * 0.35;
+    const dC = this.boomD * 0.35 + Math.sin(drift * 0.4) * 1.5;
+    if (!this._tmpP) this._tmpP = { x: 0, z: 0 };
+    this.road.toWorld(sC, dC, this._tmpP);
+    const gy = Math.max(this.world.heightAt(sC, dC), this.boomY);
+    const chase = this.tmpV2.set(this._tmpP.x, gy + 3.4 + drift * 0.15, this._tmpP.z);
+    const pos = this.tmpV.copy(this.camFrom).lerp(chase, k);
+    pos.y += Math.sin(Math.PI * k) * 1.2;
+    this.shake = Math.max(0, this.shake - dt * 1.1);
+    const sh = this.shake * this.shake, t = this.time;
+    pos.x += Math.sin(t * 41.3) * sh * 0.3;
+    pos.y += Math.sin(t * 37.1) * sh * 0.25;
+    pos.z += Math.sin(t * 33.7) * sh * 0.3;
+    const target = this.tmpV3.copy(this.fx.wreck.position);
+    target.y += 0.9;
+    target.lerp(this.lookFrom, 1 - k);
+    this.camera.position.copy(pos);
+    this.camera.lookAt(target);
+    this.camera.updateMatrixWorld();
+    this.camPos.copy(pos);
+    this.camFwd.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
   }
 
   drawIdleScreen(g, w, h) {
@@ -360,6 +460,10 @@ export class Game {
     this.rig.position.set(x, y, z);
     this.rig.rotation.set(pitch + this.bodyPitch, yaw + car.rel, this.bodyRoll);
     this.rig.updateMatrixWorld();
+    if (this.camMode === 'chase') {
+      this._chaseCam(dt);
+      return;
+    }
 
     const t = this.time;
     this.shake = Math.max(0, this.shake - dt * 1.6);
@@ -391,7 +495,8 @@ export class Game {
 
   render() {
     const r = this.renderer;
-    if (this.frame % 2 === 0) {
+    const fp = this.camMode === 'fp';
+    if (fp && this.frame % 2 === 0) {
       r.setRenderTarget(this.cockpit.mirrorRT);
       r.clear();
       r.render(this.world.scene, this.cockpit.mirrorCam);
@@ -399,8 +504,10 @@ export class Game {
     }
     r.clear();
     r.render(this.world.scene, this.camera);
-    r.clearDepth();
-    r.render(this.cockpit.scene, this.cockpit.camera);
+    if (fp) {
+      r.clearDepth();
+      r.render(this.cockpit.scene, this.cockpit.camera);
+    }
   }
 
   loop = (now) => {

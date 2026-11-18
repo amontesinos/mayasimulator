@@ -152,12 +152,23 @@ export class UI {
     setTimeout(() => el.remove(), ms + 400);
   }
 
-  pop(text) {
+  pop(text, cls = '') {
     const el = document.createElement('div');
-    el.className = 'pop';
+    el.className = `pop ${cls}`;
     el.innerHTML = `<div class="burst"></div><span>${text}</span>`;
     $('pop').appendChild(el);
-    setTimeout(() => el.remove(), 1100);
+    setTimeout(() => el.remove(), cls === 'boom' ? 1700 : 1100);
+  }
+
+  clearToasts() {
+    $('toasts').innerHTML = '';
+  }
+
+  flash() {
+    const el = $('flash');
+    el.classList.remove('on');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('on');
   }
 
   setCalib(text, sub) {

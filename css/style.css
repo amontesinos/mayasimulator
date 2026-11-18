@@ -191,6 +191,23 @@ button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulat
   background: radial-gradient(circle, #ffe14a 0%, #ff7a2b 70%);
   clip-path: polygon(100% 50%, 80.9% 58.3%, 93.3% 75%, 72.6% 72.6%, 75% 93.3%, 58.3% 80.9%, 50% 100%, 41.7% 80.9%, 25% 93.3%, 27.4% 72.6%, 6.7% 75%, 19.1% 58.3%, 0% 50%, 19.1% 41.7%, 6.7% 25%, 27.4% 27.4%, 25% 6.7%, 41.7% 19.1%, 50% 0%, 58.3% 19.1%, 75% 6.7%, 72.6% 27.4%, 93.3% 25%, 80.9% 41.7%);
 }
+.pop.boom { animation-duration: 1.6s; }
+.pop.boom span { color: #ffe14a; font-size: clamp(64px, 26vh, 132px); -webkit-text-stroke: 5px #2a0a00; text-shadow: 0 7px 0 #2a0a00; }
+.pop.boom .burst { width: 190%; height: 240%; background: radial-gradient(circle, #fff6c2 0%, #ff8a1a 40%, #c8280a 75%); }
+
+#flash {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 45%, #fffbe8 0%, #ffd27a 35%, #ff7a2a 70%, rgba(200, 40, 10, 0.6) 100%);
+}
+#flash.on { animation: flash .9s ease-out forwards; }
+@keyframes flash {
+  0% { opacity: 1; }
+  25% { opacity: .85; }
+  100% { opacity: 0; }
+}
+
 @keyframes pop {
   0% { transform: translate(-50%, -50%) scale(.2); opacity: 0; }
   14% { opacity: 1; }

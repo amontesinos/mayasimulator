@@ -284,11 +284,34 @@ export class AudioEngine {
     }
   }
 
-  airbag() {
+  // Metal-and-glass impact right before the explosion.
+  crunch() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this._noise(t, 0.3, 1.0, 'lowpass', 900, 0.7);
-    this._tone('sine', 95, t, 0.4, 0.8, null, 38);
+    this._noise(t, 0.32, 0.75, 'bandpass', 1100, 1.4);
+    this._tone('square', 95, t, 0.22, 0.25, null, 55);
+    for (let i = 0; i < 6; i++) this._tone('triangle', 2400 + Math.random() * 2400, t + 0.05 + i * 0.04, 0.12, 0.05);
+  }
+
+  explosion() {
+    if (!this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    this._noise(t, 1.8, 1.3, 'lowpass', 3200, 0.7, null, 140, 0.005);
+    this._tone('sine', 85, t, 1.4, 1.0, null, 26);
+    this._tone('triangle', 55, t + 0.02, 1.0, 0.5, null, 22);
+    const g = this._gain(0, this.sfx);
+    const src = c.createBufferSource();
+    src.buffer = this.brown;
+    src.connect(this._filter('lowpass', 260, 0.6, g));
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
+    src.start(t);
+    src.stop(t + 3.3);
+    // fire crackle
+    for (let i = 0; i < 40; i++) {
+      this._noise(t + 0.2 + Math.random() * 3.5, 0.02 + Math.random() * 0.04, 0.08 + Math.random() * 0.18, 'highpass', 1500 + Math.random() * 3000, 0.7);
+    }
   }
 
   snort() {

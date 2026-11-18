@@ -46,7 +46,6 @@ export class Cockpit {
     this.mirrorCam.rotation.order = 'YXZ';
     this.ecoT = 0;
     this.lastMph = -1;
-    this.airbagT = -1;
     this.hoodDeer = null;
     this.tmpV = new THREE.Vector3();
     this.tmpV2 = new THREE.Vector3();
@@ -67,9 +66,9 @@ export class Cockpit {
       frit: new THREE.MeshBasicMaterial({ color: 0x0c0c0e }),
       paint: new THREE.MeshPhongMaterial({ color: 0xf5f5f2, specular: 0xbbbbbb, shininess: 90 }),
       black: new THREE.MeshBasicMaterial({ color: 0x050506 }),
-      glove: new THREE.MeshLambertMaterial({ color: 0xe8dfcd, flatShading: true }),
-      cuff: new THREE.MeshLambertMaterial({ color: 0xd5cab4, flatShading: true }),
-      sleeve: new THREE.MeshLambertMaterial({ color: 0x4b5263, flatShading: true }),
+      glove: new THREE.MeshLambertMaterial({ color: 0xe8dfcd }),
+      cuff: new THREE.MeshLambertMaterial({ color: 0xd3c8b1 }),
+      sleeve: new THREE.MeshLambertMaterial({ color: 0x4b5263 }),
       sideGlass: new THREE.MeshBasicMaterial({ color: 0x7d8da3 }),
     });
 
@@ -234,19 +233,20 @@ export class Cockpit {
     lower.position.set(0, -0.125, 0);
     spin.add(lower);
 
-    // gloved hands at 10 and 2 o'clock (rotate with the wheel)
-    const gloveGeo = (() => {
-      const parts = [
-        { g: new THREE.SphereGeometry(1, 8, 6), s: [0.03, 0.052, 0.036], p: [0.012, 0, 0.004] },
-        { g: new THREE.SphereGeometry(1, 8, 6), s: [0.026, 0.05, 0.028], p: [-0.006, 0, -0.022] },
-      ];
-      const geos = parts.map(({ g, s, p }) => {
-        g.scale(...s);
-        g.translate(...p);
-        return g;
-      });
-      return geos;
-    })();
+    // Gloved hands. Glove-local axes: x = out from the wheel center, y = along
+    // the rim, z = toward the driver. The back of the hand reaches out to the
+    // wrist so the sleeve runs into it with no gap.
+    const ellG = (rx, ry, rz, px, py, pz) => {
+      const g = new THREE.SphereGeometry(1, 14, 10);
+      g.scale(rx, ry, rz);
+      g.translate(px, py, pz);
+      return g;
+    };
+    const gloveGeo = [
+      ellG(0.052, 0.052, 0.031, 0.03, 0, 0.022), // back of the hand, over the rim
+      ellG(0.03, 0.05, 0.028, -0.004, 0, -0.02), // fingers curled behind the rim
+      ellG(0.026, 0.047, 0.03, -0.022, 0, 0.004), // palm on the inside of the rim
+    ];
     // Hands turn only part of the way with the wheel (the rim slides through
     // them) so the arms never sweep across the windshield.
     const handSpin = new THREE.Group();
@@ -259,40 +259,27 @@ export class Cockpit {
       glove.position.set(Math.cos(a) * 0.185, Math.sin(a) * 0.185, 0.008);
       glove.rotation.z = a;
       for (const g of gloveGeo) glove.add(new THREE.Mesh(g, M.glove));
-      const thumb = new THREE.Mesh(new THREE.SphereGeometry(1, 6, 5), M.glove);
-      thumb.scale.set(0.012, 0.028, 0.013);
-      thumb.position.set(-0.012, side * 0.028, 0.022);
+      const thumb = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), M.glove);
+      thumb.scale.set(0.013, 0.031, 0.014);
+      thumb.position.set(-0.008, side * 0.036, 0.03);
       thumb.rotation.z = side * 0.6;
       glove.add(thumb);
       const wrist = new THREE.Object3D();
-      wrist.position.set(0.05, 0, 0.03);
+      wrist.position.set(0.072, 0, 0.034); // inside the back-of-hand blob
       glove.add(wrist);
       handSpin.add(glove);
-      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.042, 1, 9), M.sleeve);
+      // forearm: radius 0.031 at the wrist end (y=0), 0.043 at the elbow end (y=1)
+      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.031, 1, 16), M.sleeve);
       fore.geometry.translate(0, 0.5, 0);
       R.add(fore);
-      const cuffM = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.035, 0.06, 9), M.cuff);
-      cuffM.geometry.translate(0, 0.03, 0);
+      // knit cuff straddling the wrist joint
+      const cuffM = new THREE.Mesh(new THREE.CylinderGeometry(0.039, 0.035, 0.075, 16), M.cuff);
+      cuffM.geometry.translate(0, 0.0375, 0);
       R.add(cuffM);
       this.arms.push({ wrist, fore, cuff: cuffM, elbow: new THREE.Vector3(side * 0.27, -0.6, -0.2) });
     }
 
-    // airbag (hidden until needed)
-    // Puffy cushion: an indexed sphere wobbled by position (shared vertices stay joined).
-    const ab = new THREE.SphereGeometry(1, 24, 16);
-    const ap = ab.attributes.position;
-    for (let i = 0; i < ap.count; i++) {
-      const x = ap.getX(i), y = ap.getY(i), z = ap.getZ(i);
-      const k = 1 + 0.05 * Math.sin(x * 9 + y * 7) * Math.cos(z * 8 - x * 5);
-      ap.setXYZ(i, x * k, y * k, z * k * 0.72);
-    }
-    ab.computeVertexNormals();
-    this.airbag = new THREE.Mesh(ab, new THREE.MeshLambertMaterial({ color: 0xf4f2ec }));
-    this.airbag.position.set(0, -0.01, 0.1);
-    this.airbag.visible = false;
-    wb.add(this.airbag);
-
-    // --- pillars, headliner, frit band, visors
+    // --- pillars, headliner, frit band
     R.add(beamBetween(new THREE.Vector3(-0.44, -0.31, -1.0), new THREE.Vector3(-0.68, 0.21, -0.45), 0.05, M.pillar));
     R.add(beamBetween(new THREE.Vector3(CAR_X + 0.81, -0.31, -1.0), new THREE.Vector3(CAR_X + 1.05, 0.21, -0.45), 0.05, M.pillar));
     const headliner = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.03, 1.0), M.headliner);
@@ -317,17 +304,38 @@ export class Cockpit {
     glass.position.z = 0.016;
     mg.add(glass);
 
-    // --- left side mirror + door sill
+    // --- left side mirror: rounded-rectangle housing with matching glass
+    const roundRect = (w, h, r) => {
+      const s = new THREE.Shape(), x = -w / 2, y = -h / 2;
+      s.moveTo(x + r, y);
+      s.lineTo(x + w - r, y);
+      s.quadraticCurveTo(x + w, y, x + w, y + r);
+      s.lineTo(x + w, y + h - r);
+      s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      s.lineTo(x + r, y + h);
+      s.quadraticCurveTo(x, y + h, x, y + h - r);
+      s.lineTo(x, y + r);
+      s.quadraticCurveTo(x, y, x + r, y);
+      return s;
+    };
     const sm = new THREE.Group();
     sm.position.set(-1.0, -0.25, -0.98);
     sm.rotation.y = 0.75;
     R.add(sm);
-    const housing = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), M.paint);
-    housing.scale.set(0.1, 0.062, 0.05);
-    sm.add(housing);
-    const sg2 = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.085), M.sideGlass);
-    sg2.position.z = 0.052;
+    const hGeo = new THREE.ExtrudeGeometry(roundRect(0.2, 0.115, 0.04), {
+      depth: 0.06, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.012, bevelSegments: 3, curveSegments: 8,
+    });
+    hGeo.translate(0, 0, -0.06); // front (driver-facing) face ends at z = +0.018
+    sm.add(new THREE.Mesh(hGeo, M.paint));
+    const gGeo = new THREE.ShapeGeometry(roundRect(0.178, 0.094, 0.03), 8);
+    const gp = gGeo.attributes.position, guv = gGeo.attributes.uv;
+    for (let i = 0; i < gp.count; i++) guv.setXY(i, (gp.getX(i) + 0.089) / 0.178, (gp.getY(i) + 0.047) / 0.094);
+    const sg2 = new THREE.Mesh(gGeo, M.sideGlass);
+    sg2.position.z = 0.0195;
     sm.add(sg2);
+    const stalk = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.035, 0.04), M.dashDark);
+    stalk.position.set(0.12, -0.025, -0.04);
+    sm.add(stalk);
     const sill = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 1.4), M.dash);
     sill.position.set(-0.8, -0.33, -0.35);
     R.add(sill);
@@ -343,7 +351,7 @@ export class Cockpit {
       const z = -1.0 - 1.55 * t;
       for (let i = 0; i <= nx; i++) {
         const u = (i / nx) * 2 - 1;
-        const x = CAR_X + u * 0.86;
+        const x = CAR_X + u * 1.25; // wide enough to fill the windshield pillar to pillar
         let y = -0.37 - 0.11 * t;
         y += 0.035 * (1 - u * u);
         y += 0.016 * Math.exp(-Math.pow((Math.abs(u) - 0.7) / 0.07, 2));
@@ -491,16 +499,6 @@ export class Cockpit {
     this.screenTex.needsUpdate = true;
   }
 
-  deployAirbag() {
-    this.airbagT = 0;
-    this.airbag.visible = true;
-  }
-
-  resetAirbag() {
-    this.airbagT = -1;
-    this.airbag.visible = false;
-  }
-
   setHoodDeer(deer) {
     if (this.hoodDeer) this.root.remove(this.hoodDeer.group);
     this.hoodDeer = deer;
@@ -542,18 +540,12 @@ export class Cockpit {
       const dir = this.tmpV2.subVectors(arm.elbow, w);
       const len = dir.length();
       dir.divideScalar(len);
-      arm.fore.position.copy(w);
+      // start the sleeve a little inside the hand so the joint never shows
+      arm.fore.position.copy(w).addScaledVector(dir, -0.025);
       arm.fore.quaternion.setFromUnitVectors(UP, dir);
-      arm.fore.scale.set(1, len, 1);
-      arm.cuff.position.copy(w).addScaledVector(dir, -0.012);
+      arm.fore.scale.set(1, len + 0.025, 1);
+      arm.cuff.position.copy(w).addScaledVector(dir, -0.022);
       arm.cuff.quaternion.copy(arm.fore.quaternion);
-    }
-
-    if (this.airbagT >= 0) {
-      this.airbagT += dt;
-      const t = this.airbagT;
-      const s = t < 0.12 ? lerp(0.02, 0.38, t / 0.12) : t < 0.35 ? 0.38 - 0.03 * Math.sin(((t - 0.12) / 0.23) * Math.PI) : Math.max(0.2, 0.38 - (t - 0.35) * 0.08);
-      this.airbag.scale.setScalar(s);
     }
   }
 }
