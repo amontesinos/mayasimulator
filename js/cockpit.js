@@ -444,14 +444,26 @@ export class Cockpit {
     glass.position.z = 0.0145;
     mg.add(glass);
 
-    // --- left side mirror: rounded-rectangle housing with matching glass
-    const sm = frameOf(R, -1.0, -0.25, -0.98, 0, 0.75, 0);
+    // --- left side mirror, mounted where it is on the real car: on the door's
+    // front corner. Inside, that corner is a black triangular "sail" panel
+    // between the A-pillar base and the window ledge; the mirror's arm runs
+    // from behind it out to a rounded white housing whose glass faces the driver.
+    const sail = new THREE.Shape();
+    sail.moveTo(1.0, -0.312); // shape x = -z: A-pillar base
+    sail.lineTo(0.76, -0.3); // back along the window ledge
+    sail.lineTo(0.85, -0.17); // up the A-pillar
+    sail.closePath();
+    const sailGeo = new THREE.ExtrudeGeometry(sail, { depth: 0.045, bevelEnabled: false });
+    sailGeo.rotateY(Math.PI / 2);
+    B.add(sailGeo, M.rubber, xf(-0.525, 0, 0));
+    const sm = frameOf(R, -0.74, -0.23, -0.8, 0, 0.75, 0);
     const hGeo = new THREE.ExtrudeGeometry(roundRect(0.2, 0.115, 0.04), {
       depth: 0.06, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.012, bevelSegments: 3, curveSegments: 8,
     });
     B.add(flat(hGeo), M.paint, xf(0, 0, -0.06), sm.matrix); // driver-facing face ends at z = +0.018
     B.add(flat(fitUV(new THREE.ShapeGeometry(roundRect(0.178, 0.094, 0.03), 8), 0.178, 0.094)), M.sideGlass, xf(0, 0, 0.0195), sm.matrix);
-    B.add(new THREE.BoxGeometry(0.1, 0.035, 0.04), M.rubber, xf(0.12, -0.025, -0.04), sm.matrix);
+    const armStart = new THREE.Vector3(0.09, -0.02, -0.035).applyMatrix4(sm.matrix);
+    B.add(flat(beamGeo(armStart, V(-0.515, -0.272, -0.905), 0.017, 10)), M.rubber);
 
     // --- white hood
     B.add(flat(this._hoodGeo()), M.paint);
