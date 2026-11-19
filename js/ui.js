@@ -195,7 +195,7 @@ export class UI {
     $('btn-modes').classList.toggle('hidden', !data.unlocked);
     $('btn-sound').textContent = data.sound ? '🔊 Sound on' : '🔇 Sound off';
     $('t-howto').innerHTML = isTouch
-      ? 'Hold your phone sideways like a steering wheel. <b>Tilt to steer</b> · right thumb = gas · left thumb = brake'
+      ? 'Hold your phone sideways like a steering wheel. <b>Tilt to steer</b><br>Right thumb = gas · left thumb = brake'
       : '<b>Arrow keys / WASD</b> to drive · <b>H</b> to honk · <b>P</b> to pause';
   }
 

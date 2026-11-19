@@ -357,6 +357,22 @@ export class AudioEngine {
     for (let i = 0; i < 6; i++) this._tone('triangle', 2400 + Math.random() * 2400, t + 0.05 + i * 0.04, 0.12, 0.05);
   }
 
+  // Knocking over a roadside marker post (plastic thwack) or a sign (metal clang).
+  knock(kind, k = 1) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    if (kind === 'sign') {
+      for (const [f, dur, peak] of [[410, 0.9, 0.12], [1130, 0.6, 0.08], [1790, 0.45, 0.05], [2640, 0.3, 0.035]]) {
+        this._tone('sine', f, t, dur, peak * (0.5 + k * 0.5));
+      }
+      this._noise(t, 0.12, 0.1 + 0.3 * k, 'bandpass', 2200, 0.9);
+      this._tone('triangle', 140, t, 0.18, 0.3 * k, null, 70);
+    } else {
+      this._noise(t, 0.09, 0.3 + 0.3 * k, 'bandpass', 900, 1.1);
+      this._tone('triangle', 220, t, 0.12, 0.08 + 0.25 * k, null, 110);
+    }
+  }
+
   // Heavy impact against something that doesn't give (a tree, a rock).
   thud() {
     if (!this.ctx) return;

@@ -1,9 +1,18 @@
 // The outside world: sky, mountains, lighting, and the endless road built in
 // chunks (asphalt, terrain, trees, posts, signs) that stream in ahead of the car.
 import * as THREE from '../vendor/three.module.min.js';
-import { mulberry32, rand, smoothstep, makeNoise2D, fbm, pick, weighted } from './util.js';
+import { mulberry32, rand, clamp, smoothstep, makeNoise2D, fbm, pick, weighted } from './util.js';
 import { part, merge, mat } from './geo.js';
 import { makeRoadTexture, makeWarningSign, makeTextSign } from './textures.js';
+
+// scratch objects for posing knocked-over signs and posts
+const _qa = new THREE.Quaternion();
+const _qb = new THREE.Quaternion();
+const _axis = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+const _mf = new THREE.Matrix4();
+const _pf = new THREE.Vector3();
+const _one3 = new THREE.Vector3(1, 1, 1);
 
 export const ROADS = {
   twoLane: {
@@ -167,6 +176,7 @@ export class World {
     this.scene.add(this.dynamic);
     this.time = 0;
     this.lastSignS = -1e9;
+    this.falling = []; // signs and posts currently tipping over
     this.roadTex = {};
     this.signMats = {};
     this.signGeos = {};
@@ -301,6 +311,7 @@ export class World {
     this.roadSpec = ROADS[theme.road];
     for (const ch of this.chunks.values()) this._disposeChunk(ch);
     this.chunks.clear();
+    this.falling.length = 0;
     this.lastSignS = -1e9;
     this.seed = road.o.seed;
     const u = this.sky.material.uniforms, S = theme.sky;
@@ -373,6 +384,7 @@ export class World {
         budget--;
       }
     }
+    if (this.falling.length) this._updateFalling(dt);
   }
 
   setHeadlight(pos, dir) {
@@ -382,19 +394,80 @@ export class World {
   }
 
   // First roadside obstacle overlapping a box centered at (s, d), or null.
-  hitObstacle(s, d, halfL, halfW) {
+  // kinds: optional Set to only look for some kinds. Knocked-over ones don't count.
+  hitObstacle(s, d, halfL, halfW, kinds = null) {
     const ci = Math.floor(s / this.chunkLen);
     for (let c = ci - 1; c <= ci + 1; c++) {
       const ch = this.chunks.get(c);
       if (!ch) continue;
       for (const o of ch.obstacles) {
+        if (o.down || (kinds && !kinds.has(o.kind))) continue;
         if (Math.abs(o.s - s) < halfL + o.r && Math.abs(o.d - d) < halfW + o.r) return o;
       }
     }
     return null;
   }
 
+  // Knock a sign or marker post over, falling away along (dx, dz), the car's
+  // direction of travel. It tips over from its base, bounces once on the
+  // ground, and stays down.
+  knockDown(o, dx, dz, speed) {
+    if (o.down) return;
+    o.down = true;
+    const sign = o.kind === 'sign';
+    const base = sign ? o.holder.position : o.t;
+    this.falling.push({
+      o, dx, dz,
+      a: 0, // tilt from upright (rad)
+      w: clamp(speed * (sign ? 0.18 : 0.35), 1.2, sign ? 4 : 8), // tilt rate
+      g: sign ? 5.5 : 12, // how hard gravity pulls it over (a tall sign falls slower)
+      max: sign ? 1.45 : 1.5, // lying (almost) flat
+      slide: speed * (sign ? 0.08 : 0.2), // gets shoved a little way too
+      px: base.x, py: base.y, pz: base.z,
+      rot: sign ? o.holder.rotation.y : o.t.rot,
+      settled: false,
+    });
+  }
+
+  _updateFalling(dt) {
+    for (let i = this.falling.length - 1; i >= 0; i--) {
+      const f = this.falling[i];
+      if (f.o.gone) {
+        this.falling.splice(i, 1);
+        continue;
+      }
+      if (!f.settled) {
+        f.w += f.g * Math.sin(Math.max(0.08, f.a)) * dt;
+        f.a += f.w * dt;
+        if (f.a >= f.max) {
+          f.a = f.max;
+          if (f.w < 1.2) {
+            f.settled = true;
+            f.w = 0;
+          } else f.w = -f.w * 0.3;
+        }
+      }
+      f.slide *= Math.exp(-5 * dt);
+      f.px += f.dx * f.slide * dt;
+      f.pz += f.dz * f.slide * dt;
+      // upright pose (yaw), then tipped about the horizontal axis across the fall direction
+      _qa.setFromAxisAngle(_axis.set(f.dz, 0, -f.dx), f.a).multiply(_qb.setFromAxisAngle(_up, f.rot));
+      if (f.o.holder) {
+        f.o.holder.position.set(f.px, f.py, f.pz);
+        f.o.holder.quaternion.copy(_qa);
+      } else {
+        _mf.compose(_pf.set(f.px, f.py, f.pz), _qa, _one3);
+        for (const im of f.o.ims) {
+          im.setMatrixAt(f.o.i, _mf);
+          im.instanceMatrix.needsUpdate = true;
+        }
+      }
+      if (f.settled && f.slide < 0.05) this.falling.splice(i, 1);
+    }
+  }
+
   _disposeChunk(ch) {
+    for (const o of ch.obstacles) o.gone = true;
     for (const g of ch.owned) g.dispose();
     for (const im of ch.instanced) im.dispose();
     this.scene.remove(ch.group);
@@ -582,6 +655,7 @@ export class World {
       im.computeBoundingSphere();
       instanced.push(im);
       group.add(im);
+      return im;
     };
     const pineCols = TR.pine.map((c) => new THREE.Color(c));
     const aspenCols = TR.aspenCols.map((c) => new THREE.Color(c));
@@ -593,17 +667,21 @@ export class World {
 
     // --- roadside delineator posts
     if (T.posts) {
-      const posts = [];
+      const posts = [], postObs = [];
       for (let s = Math.ceil(s0 / 40) * 40; s < s0 + L; s += 40) {
         for (const side of [-1, 1]) {
           const d = side > 0 ? R.right + 0.7 : R.left - 0.7;
           const yaw = road.toWorld(s, d, tmp);
-          posts.push({ x: tmp.x, y: this.heightAt(s, d) - 0.05, z: tmp.z, sc: 1, sy: 1, rot: yaw });
-          obstacles.push({ s, d, r: 0.12, kind: 'post' });
+          const t = { x: tmp.x, y: this.heightAt(s, d) - 0.05, z: tmp.z, sc: 1, sy: 1, rot: yaw };
+          // t and i let a hit knock this post's instance over (see knockDown)
+          const o = { s, d, r: 0.12, kind: 'post', t, i: posts.length };
+          posts.push(t);
+          obstacles.push(o);
+          postObs.push(o);
         }
       }
-      inst(this.geos.post, this.mats.post, posts);
-      inst(this.geos.reflector, this.mats.reflector, posts);
+      const ims = [inst(this.geos.post, this.mats.post, posts), inst(this.geos.reflector, this.mats.reflector, posts)];
+      for (const o of postObs) o.ims = ims;
     }
 
     // --- highway barrier and guardrail
@@ -638,8 +716,8 @@ export class World {
       if (!key) continue;
       this.lastSignS = sc;
       const sd = R.right + (T.guardrail ? 2.1 : 1.6);
-      this._addSign(group, key, sc, sd);
-      obstacles.push({ s: sc, d: sd, r: 0.2, kind: 'sign' });
+      const holder = this._addSign(group, key, sc, sd);
+      obstacles.push({ s: sc, d: sd, r: 0.2, kind: 'sign', holder });
     }
 
     this.scene.add(group);
@@ -727,5 +805,6 @@ export class World {
       holder.add(plaque);
     }
     group.add(holder);
+    return holder;
   }
 }

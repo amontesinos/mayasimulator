@@ -25,6 +25,8 @@ const CAR_HALF_W = 0.86;
 // Off-road things the car can't push through: it stops dead against them.
 // (Signs and posts give way; guardrails and barriers are glanced off.)
 const IMMOVABLE = new Set(['tree', 'forest', 'rock']);
+// Roadside things that get knocked over when the car runs into them.
+const BREAKABLE = new Set(['post', 'sign']);
 
 export class Game {
   constructor({ canvas, ui, input, audio, store }) {
@@ -267,6 +269,16 @@ export class Game {
     this.endRun('crash', kind, ob);
   }
 
+  // A sign or marker post the car ran into falls over, away from the car.
+  // (In the crash modes it still counts as a crash; this is the visible part.)
+  knockOver(ob) {
+    const f = this.tmpV.set(0, 0, -1).applyQuaternion(this.rig.quaternion);
+    const len = Math.hypot(f.x, f.z) || 1;
+    this.world.knockDown(ob, f.x / len, f.z / len, this.car.v);
+    this.audio.knock(ob.kind, Math.min(1, this.car.v / 20));
+    if (this.state === 'playing') this.car.v *= ob.kind === 'sign' ? 0.92 : 0.97; // Chill Cruise: a little bump
+  }
+
   // Back the car out of an obstacle it ran into (the hit is caught a frame
   // late), leaving the front a little crumpled into it.
   _backOff(ob) {
@@ -407,6 +419,14 @@ export class Game {
         }
         if (kind) this.crash(kind, ob);
       }
+    }
+    // Signs and marker posts the car runs into get knocked over, in every mode
+    // (in Chill Cruise the car just drives on; a wreck still sliding knocks them too).
+    if ((st === 'playing' || st === 'ending') && car.v > 1.5) {
+      const ob = this.world.hitObstacle(car.s, car.d, CAR_HALF_L, CAR_HALF_W, BREAKABLE);
+      if (ob) this.knockOver(ob);
+    }
+    if (st === 'playing') {
       if (car.scrape && !this.scraping) this.audio.scrape();
       this.scraping = car.scrape > 0;
     } else if (st === 'ending') {
