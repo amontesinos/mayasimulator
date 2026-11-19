@@ -836,26 +836,19 @@ export class Cockpit {
     return canvasTexture(c);
   }
 
-  // Black ceramic band at the top of the windshield, fading out in dots.
+  // Dark band at the top of the windshield, fading smoothly into the glass.
+  // (A real frit fades in a dot pattern, but at screen size the dots read as
+  // noise where only the band's edge peeks in at the top of wide screens.)
   _fritTexture() {
-    const W = 512, H = 64;
-    const [c, g] = makeCanvas(W, H);
-    g.fillStyle = '#0c0c0e';
-    g.fillRect(0, 0, W, H * 0.5);
-    const rows = 6;
-    for (let j = 0; j < rows; j++) {
-      const y = H * 0.5 + (j + 0.5) * ((H * 0.5) / rows);
-      const r = 2.6 * (1 - j / rows) + 0.3;
-      for (let x = (j % 2) * 3; x < W; x += 6) {
-        g.beginPath();
-        g.arc(x, y, r, 0, Math.PI * 2);
-        g.fill();
-      }
-    }
-    const t = canvasTexture(c);
-    t.wrapS = THREE.RepeatWrapping;
-    t.repeat.set(8, 1);
-    return t;
+    const [c, g] = makeCanvas(4, 128);
+    const grd = g.createLinearGradient(0, 0, 0, 128);
+    grd.addColorStop(0, 'rgba(12,12,14,1)');
+    grd.addColorStop(0.45, 'rgba(12,12,14,1)');
+    grd.addColorStop(0.7, 'rgba(12,12,14,0.55)');
+    grd.addColorStop(1, 'rgba(12,12,14,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 4, 128);
+    return canvasTexture(c);
   }
 
   _stitchTexture() {
