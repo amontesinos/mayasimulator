@@ -29,8 +29,11 @@ Chill Cruise and Deer Revenge unlock after your first Deer Dodge run (saved on t
   textures, and all sound (Web Audio synthesis, including two radio stations).
 - Tilt steering converts `deviceorientation` beta/gamma into a gravity vector, rotates it into
   screen space, and steers on the screen's left-right tilt. That avoids the angle jumps raw
-  beta/gamma have when the phone is upright, and calibration double-checks the screen
-  rotation from gravity.
+  beta/gamma have when the phone is upright. Straight is the phone held level (true level,
+  the same reading as the bubble level on the start screen), so there's nothing to calibrate.
+  At the start of each run the game double-checks the screen rotation from gravity, and if
+  the phone is held more than 20° off level it centers on that hold instead. Pause →
+  **Recenter steering** makes the current hold straight.
 - iOS needs HTTPS and a tap before it will share motion data, which is why the game starts
   with a button and is hosted on GitHub Pages.
 

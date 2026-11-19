@@ -147,8 +147,9 @@ export class Game {
     this.startRun(p);
   }
 
-  // "Calibrating steering…": a bubble level shows the phone's tilt live while a
-  // 3-2-1 countdown fills the bar; the hold at GO becomes "straight".
+  // "Get ready…": a 3-2-1 countdown fills the bar while a bubble level shows the
+  // phone's tilt live. Steering is relative to level, the same reading the
+  // bubble shows, so there is nothing to calibrate (see Input.centerOnLevel).
   updateCalib(dt) {
     const inp = this.input;
     if (this.permPending) {
@@ -164,12 +165,12 @@ export class Game {
     let sub = 'Arrow keys or WASD to drive';
     if (inp.isTouch) {
       if (this.permPending) sub = 'Tap “Allow” so you can steer by tilting';
-      else if (tilt) sub = 'Hold your phone level, like a steering wheel';
+      else if (tilt) sub = 'Hold your phone level to go straight. Tilt it to steer.';
       else sub = 'Steer by dragging on the left side of the screen';
     }
     this.ui.setCalib({
       count: n > 0 ? String(n) : 'GO!',
-      title: !tilt ? 'Get ready…' : n > 0 ? 'Calibrating steering…' : 'Steering calibrated!',
+      title: n > 0 ? 'Get ready…' : 'Drive safe!',
       sub,
       progress: this.calibT / (3 * CALIB_STEP),
       level: tilt,
@@ -182,7 +183,7 @@ export class Game {
   finishCalib() {
     const tilt = this.input.isTouch && this.input.tiltPermission === 'granted' && this.input.hasTilt();
     this.input.mode = tilt ? 'tilt' : this.input.isTouch ? 'touch' : 'keys';
-    if (tilt) this.input.calibrate();
+    const heldTilted = tilt && this.input.centerOnLevel();
     this.state = 'playing';
     this.input.active = true;
     this.input.clearTouches();
@@ -196,7 +197,9 @@ export class Game {
     this.runS0 = this.car.s;
     this.mode.start();
     this.ui.setHud(this.mode.hud());
-    if (this.input.isTouch && !tilt) {
+    if (heldTilted) {
+      this.toast('Steering centered on how you’re holding the phone', 'tip', 3200);
+    } else if (this.input.isTouch && !tilt) {
       const why = this.input.tiltPermission === 'denied' ? 'Motion access was blocked' : 'Tilt steering is unavailable';
       this.toast(`${why}, so steer by dragging on the left side.`, 'tip', 4500);
     } else if (!this.input.isTouch) {

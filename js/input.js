@@ -9,6 +9,10 @@
 import { clamp, approach, DEG } from './util.js';
 
 const SENS = [34, 26, 19]; // degrees of tilt for full lock: low / medium / high
+// Straight is the phone held level (true level, from gravity, like the bubble
+// level on the start screen). Only if a run starts with the phone tilted more
+// than this (say, playing lying down) does the current hold become straight.
+const LEVEL_FALLBACK = 20 * DEG;
 
 function apiScreenAngle() {
   let a = 0;
@@ -103,9 +107,9 @@ export class Input {
     this.roll = Math.asin(clamp(-sx, -1, 1));
   }
 
-  // Zero the steering at the current hold. Also double-checks which way the
-  // screen is rotated using gravity, in case the browser reports it wrong.
-  calibrate() {
+  // Double-check which way the screen is rotated using gravity, in case the
+  // browser reports it wrong. Needs the phone roughly upright, not flat.
+  detectScreen() {
     const [ux, uy, uz] = this.upAvg;
     if (Math.abs(uz) < 0.85) {
       let best = apiScreenAngle(), bestY = -2;
@@ -121,6 +125,20 @@ export class Input {
       this.roll = Math.asin(clamp(-sx, -1, 1));
     }
     this.rollSmooth = this.roll;
+  }
+
+  // Start of a run: straight = level, nothing to calibrate. Returns true if the
+  // phone was held far from level, so the current hold was used instead.
+  centerOnLevel() {
+    this.detectScreen();
+    const tilted = Math.abs(this.roll) > LEVEL_FALLBACK;
+    this.neutral = tilted ? this.roll : 0;
+    return tilted;
+  }
+
+  // Pause menu "Recenter steering": make the current hold straight.
+  calibrate() {
+    this.detectScreen();
     this.neutral = this.roll;
   }
 
