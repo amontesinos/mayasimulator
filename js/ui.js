@@ -3,6 +3,7 @@ import { mulberry32, fmt } from './util.js';
 import { paintDeerSign } from './textures.js';
 
 const $ = (id) => document.getElementById(id);
+const clampUnit = (v) => Math.min(1, Math.max(0, v));
 
 class CrackLayer {
   constructor(canvas) {
@@ -171,9 +172,19 @@ export class UI {
     el.classList.add('on');
   }
 
-  setCalib(text, sub) {
-    $('c-count').textContent = text;
-    if (sub) $('c-text').textContent = sub;
+  // Calibration screen. Only the fields passed are updated (and only when they change).
+  setCalib({ count, title, sub, progress, level, x, ok }) {
+    const c = this.calibState || (this.calibState = {});
+    const text = (id, key, v) => {
+      if (v != null && c[key] !== v) $(id).textContent = c[key] = v;
+    };
+    text('c-count', 'count', count);
+    text('c-text', 'title', title);
+    text('c-sub', 'sub', sub);
+    if (progress != null) $('c-bar').style.transform = `scaleX(${clampUnit(progress).toFixed(3)})`;
+    if (level != null && c.level !== level) $('c-level').classList.toggle('hidden', !(c.level = level));
+    if (ok != null && c.ok !== ok) $('c-level').classList.toggle('ok', (c.ok = ok));
+    if (x != null) $('c-bubble').style.transform = `translateX(${(clampUnit(x * 0.5 + 0.5) * 120 - 60).toFixed(1)}px)`;
   }
 
   setTitle(Mode, data, isTouch) {

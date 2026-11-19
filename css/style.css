@@ -264,8 +264,33 @@ button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulat
 
 #s-calib { background: rgba(20, 12, 34, .45); }
 .calib { text-align: center; }
-.calib-phone { font-size: 46px; display: inline-block; animation: wobble 1.6s ease-in-out infinite; }
 .calib-text { font-family: var(--comic); font-size: clamp(18px, 6.5vh, 30px); margin-top: 4px; text-shadow: 0 3px 0 #151515; }
+/* live bubble level: the bubble drifts to the high side, like a real one */
+.level { display: flex; justify-content: center; margin-bottom: clamp(4px, 2vh, 10px); }
+.level-tube {
+  position: relative; width: 170px; height: 30px; border-radius: 15px;
+  background: linear-gradient(#e2fb8c, #a9d93f);
+  border: 3px solid #151515;
+  box-shadow: 0 4px 0 #151515, inset 0 3px 0 rgba(255, 255, 255, .45);
+}
+.level-mark {
+  position: absolute; left: 50%; top: 3px; bottom: 3px; width: 44px; margin-left: -22px;
+  border-left: 3px solid rgba(21, 21, 21, .7); border-right: 3px solid rgba(21, 21, 21, .7);
+  transition: border-color .2s;
+}
+.level-bubble {
+  position: absolute; left: 50%; top: 4px; width: 34px; height: 16px; margin-left: -17px; border-radius: 10px;
+  background: radial-gradient(circle at 35% 35%, #fff, #f4ffd6 60%, #d9f28f);
+  border: 2px solid rgba(21, 21, 21, .55);
+  transition: box-shadow .2s;
+}
+.level.ok .level-bubble { box-shadow: 0 0 10px 3px rgba(110, 255, 140, .95); }
+.level.ok .level-mark { border-color: #17772f; }
+.calib-bar {
+  width: min(260px, 50vw); height: 14px; margin: 0 auto clamp(4px, 1.6vh, 8px);
+  border: 3px solid #151515; border-radius: 8px; background: rgba(255, 255, 255, .18); overflow: hidden;
+}
+#c-bar { height: 100%; background: var(--sign); transform-origin: left center; transform: scaleX(0); }
 .calib-count {
   font-family: var(--comic);
   font-size: clamp(64px, 26vh, 124px);
@@ -274,8 +299,7 @@ button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulat
   text-shadow: 0 6px 0 #151515;
   line-height: 1.1;
 }
-.calib-sub { font-size: 13px; color: var(--muted); font-weight: 800; }
-@keyframes wobble { 0%, 100% { transform: rotate(-90deg); } 30% { transform: rotate(-78deg); } 70% { transform: rotate(-102deg); } }
+.calib-sub { font-size: clamp(14px, 4.6vh, 19px); color: #fff; font-weight: 800; text-shadow: 0 2px 0 #151515; }
 
 .card {
   background: rgba(22, 15, 36, .92);

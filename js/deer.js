@@ -108,6 +108,9 @@ function shared() {
   shadowGeo.rotateX(-Math.PI / 2);
   SHARED = {
     material: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+    // same look, but drawn in the transparent pass after the crash smoke so a
+    // launched deer stays visible as it flies off through the plume
+    flyMaterial: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true }),
     body,
     head,
     front: buildFrontLeg(),
@@ -132,7 +135,12 @@ export class Deer {
     const K = KINDS[kind];
     this.kind = kind;
     this.K = K;
-    const mesh = (g) => new THREE.Mesh(g, S.material);
+    this.meshes = [];
+    const mesh = (g) => {
+      const m = new THREE.Mesh(g, S.material);
+      this.meshes.push(m);
+      return m;
+    };
     this.group = new THREE.Group();
     this.model = new THREE.Group();
     this.model.rotation.y = Math.PI; // model is built facing +z; the group faces -z
@@ -206,6 +214,7 @@ export class Deer {
     this.locked = false;
     this.flying = false;
     this.flyT = 0;
+    this.setFlyLook(false);
     this.shadow.visible = true;
     this.hit = false;
     this.passed = false;
@@ -244,14 +253,25 @@ export class Deer {
     this.vy = vy;
   }
 
-  // Cartoon launch: fly in a straight line up and away down the road, spinning.
-  // Uses world coordinates so the flight doesn't bend with the road.
+  setFlyLook(on) {
+    const S = shared();
+    for (const m of this.meshes) {
+      m.material = on ? S.flyMaterial : S.material;
+      m.renderOrder = on ? 14 : 0; // after smoke (11), fire (12) and sparks (13)
+    }
+  }
+
+  // Cartoon launch: up and away down the road, spinning, and curving ever
+  // higher (it accelerates upward). It is still climbing, high above the
+  // mountains, when the KABOOM clears, then shrinks to a speck in the sky.
+  // World coordinates, so the flight doesn't bend with the road.
   blastOff(road, carV) {
     const yaw = road.sample(this.s).yaw;
-    const fwd = carV + 28;
-    const side = (Math.random() - 0.5) * 6;
+    const fwd = carV + 26;
+    const side = (Math.random() - 0.5) * 5;
     this.flyPos.copy(this.group.position);
-    this.flyVel.set(-Math.sin(yaw) * fwd + Math.cos(yaw) * side, 4.5, -Math.cos(yaw) * fwd - Math.sin(yaw) * side);
+    this.flyVel.set(-Math.sin(yaw) * fwd + Math.cos(yaw) * side, 7, -Math.cos(yaw) * fwd - Math.sin(yaw) * side);
+    this.setFlyLook(true);
     this.flyYaw = this.group.rotation.y;
     this.spin = (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 3);
     this.flyRoll = (Math.random() < 0.5 ? -1 : 1) * 9;
@@ -269,6 +289,7 @@ export class Deer {
     this.t += dt;
     if (this.flying) {
       this.flyT += dt;
+      this.flyVel.y += 3.5 * dt; // cartoon lift: the climb gets steeper
       this.flyPos.addScaledVector(this.flyVel, dt);
       this.flyYaw += this.spin * dt;
       this.roll += this.flyRoll * dt;
@@ -398,7 +419,7 @@ export class Deer {
     }
     if (!this.bubble) {
       this.bubble = new THREE.Sprite(entry.mat);
-      this.bubble.renderOrder = 5;
+      this.bubble.renderOrder = 15; // over crash smoke and a flying deer
       this.group.add(this.bubble);
     }
     this.bubble.material = entry.mat;
@@ -433,7 +454,8 @@ export class Deer {
       this.bubbleT -= dt;
       if (this.bubbleT <= 0) this.bubble.visible = false;
       else {
-        const h = clamp(this.camDist * 0.07, 0.55, 3.2);
+        // a launched deer's bubble keeps growing so it stays readable far away
+        const h = clamp(this.camDist * 0.07, 0.55, this.flying ? 10 : 3.2);
         this.bubble.scale.set(h * this.bubbleAspect, h, 1);
         this.bubble.position.set(this.bubbleX || 0, this.bubbleY != null ? this.bubbleY : 2.0 * k + h * 0.55, -0.3 * k);
         this.bubble.material.opacity = Math.min(1, this.bubbleT * 3);

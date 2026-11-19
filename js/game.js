@@ -19,6 +19,7 @@ const LIMITS = {
   highway: { pavedL: -9, pavedR: 9, hardL: -5.95, hardR: 7.95 },
 };
 const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+const CALIB_STEP = 1.0; // seconds per number in the 3-2-1 calibration countdown
 
 export class Game {
   constructor({ canvas, ui, input, audio, store }) {
@@ -43,7 +44,13 @@ export class Game {
     this.tmpV3 = new THREE.Vector3();
     this.tmpV4 = new THREE.Vector3();
     this.tmpV5 = new THREE.Vector3();
+    this.tmpV6 = new THREE.Vector3();
+    this.tmpV7 = new THREE.Vector3();
     this.carVel = new THREE.Vector3();
+    // crash camera tilts up to follow something in the sky (the launched deer)
+    this.skyPos = new THREE.Vector3();
+    this.skyT = 0;
+    this.skyLook = 0;
     this.rig = new THREE.Object3D();
     this.rig.rotation.order = 'YXZ';
     this.eye = new THREE.Vector3(-CAR_X, 1.2, 0.12);
@@ -93,6 +100,7 @@ export class Game {
     this.fx.reset();
     this.camMode = 'fp';
     this.boom = null;
+    this.skyT = this.skyLook = 0;
     this.ui.crack.clear();
     this.road = new Road({ seed: (Math.random() * 1e6) | 0, ...M.road });
     this.world.reset(theme, this.road);
@@ -124,7 +132,7 @@ export class Game {
     this.state = 'calib';
     this.calibT = 0;
     this.ui.showHud(false);
-    this.ui.setCalib('3', this.input.isTouch ? 'Hold your phone sideways like a steering wheel' : 'Get ready…');
+    this.ui.setCalib({ count: '3', progress: 0, x: 0, ok: false });
     this.ui.show('s-calib');
     // Hold the countdown until the iOS motion prompt has been answered.
     this.permPending = true;
@@ -139,19 +147,36 @@ export class Game {
     this.startRun(p);
   }
 
+  // "Calibrating steering…": a bubble level shows the phone's tilt live while a
+  // 3-2-1 countdown fills the bar; the hold at GO becomes "straight".
   updateCalib(dt) {
+    const inp = this.input;
     if (this.permPending) {
       this.permWaitT += dt;
       if (this.permWaitT > 30) this.permPending = false;
     }
-    if (this.portrait || this.permPending) {
-      this.calibT = 0;
-      return;
+    const waiting = this.portrait || this.permPending;
+    this.calibT = waiting ? 0 : this.calibT + dt;
+    const tilt = inp.isTouch && inp.tiltPermission !== 'denied' && inp.tiltPermission !== 'unsupported';
+    const live = tilt && inp.hasTilt();
+    const roll = live ? inp.rollSmooth : 0;
+    const n = 3 - Math.floor(this.calibT / CALIB_STEP);
+    let sub = 'Arrow keys or WASD to drive';
+    if (inp.isTouch) {
+      if (this.permPending) sub = 'Tap “Allow” so you can steer by tilting';
+      else if (tilt) sub = 'Hold your phone level, like a steering wheel';
+      else sub = 'Steer by dragging on the left side of the screen';
     }
-    this.calibT += dt;
-    const n = 3 - Math.floor(this.calibT / 0.75);
-    this.ui.setCalib(n > 0 ? String(n) : 'GO!');
-    if (this.calibT >= 2.6) this.finishCalib();
+    this.ui.setCalib({
+      count: n > 0 ? String(n) : 'GO!',
+      title: !tilt ? 'Get ready…' : n > 0 ? 'Calibrating steering…' : 'Steering calibrated!',
+      sub,
+      progress: this.calibT / (3 * CALIB_STEP),
+      level: tilt,
+      x: clamp(-roll / (12 * DEG), -1, 1),
+      ok: live && Math.abs(roll) < 3 * DEG,
+    });
+    if (this.calibT >= 3 * CALIB_STEP + 0.4) this.finishCalib();
   }
 
   finishCalib() {
@@ -189,6 +214,7 @@ export class Game {
     this.crashKind = kind;
     this.input.active = false;
     this.input.clearTouches();
+    this.skyT = this.skyLook = 0;
     if (reason === 'bonk' || reason === 'crash') {
       this.boom = { exploded: false, stopT: null };
       // The car keeps its momentum: it rolls on, explodes, and slides to a halt.
@@ -204,6 +230,12 @@ export class Game {
       this.camMode = 'chase';
       this.camT = 0;
     } else this.audio.snort();
+  }
+
+  // Called each frame by a mode while something worth watching flies away.
+  skyFollow(pos) {
+    this.skyPos.copy(pos);
+    this.skyT = 0.9; // keep looking a moment after the last call
   }
 
   // Off-road impact: all hearts gone at once.
@@ -352,10 +384,12 @@ export class Game {
       if (M.ending) M.ending(dt, this.endT);
       let endAt = 3.6;
       if (this.boom) {
-        // game over once the wreck has slid to a stop (and the deer has twinkled)
+        // game over once the wreck has slid to a stop...
         if (this.boom.exploded && this.boom.stopT == null && car.v < 0.25) this.boom.stopT = this.endT;
         endAt = this.boom.stopT != null ? Math.max(4.2, this.boom.stopT + 1.3) : 7.5;
       }
+      // ...and the launched deer has flown off and twinkled (capped, just in case)
+      if (M.endHold) endAt = Math.max(endAt, M.endHold());
       if (this.endT > Math.min(endAt, 7.5)) this.showGameOver();
     } else if (st === 'calib') this.updateCalib(dt);
     // re-check: the countdown may have just started the run this frame
@@ -435,8 +469,17 @@ export class Game {
     pos.y += Math.sin(t * 37.1) * sh * 0.25;
     pos.z += Math.sin(t * 33.7) * sh * 0.3;
     const target = this.tmpV3.copy(this.fx.wreck.position);
-    target.y += 1.1; // aim a little above the wreck so the sky (and the flying deer) stays in frame
+    target.y += 1.1; // aim a little above the wreck
     target.lerp(lookFrom, 1 - k);
+    // While the launched deer is in the air, tilt up to follow it into the sky
+    // (keeping the burning wreck in the bottom of the frame), then settle back.
+    this.skyT = Math.max(0, this.skyT - dt);
+    this.skyLook = damp(this.skyLook, this.skyT > 0 ? 1 : 0, 2.2, dt);
+    if (this.skyLook > 0.002) {
+      const toWreck = this.tmpV6.copy(target).sub(pos).normalize();
+      const toSky = this.tmpV7.copy(this.skyPos).sub(pos).normalize();
+      target.copy(pos).add(toWreck.lerp(toSky, 0.4 * this.skyLook).normalize());
+    }
     this.camera.position.copy(pos);
     this.camera.lookAt(target);
     this.camera.updateMatrixWorld();

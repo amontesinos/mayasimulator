@@ -360,7 +360,7 @@ export class DodgeMode {
       // Last heart: the deer is launched off into the sky (it's fine!) and the
       // car keeps rolling and blows up. No BONK pop; the KABOOM is coming.
       deer.blastOff(g.road, car.v);
-      deer.say(pick(r, BLAST_QUIPS), 1.5);
+      deer.say(pick(r, BLAST_QUIPS), 3.1);
       this.blasted = deer;
       g.audio.bonk();
       g.endRun('bonk');
@@ -387,15 +387,25 @@ export class DodgeMode {
     }
   }
 
-  // During the crash: once the launched deer is a speck in the sky, it twinkles out.
-  ending() {
+  // During the crash: the launched deer climbs on past the KABOOM, and once it
+  // is a speck high in the sky it twinkles out.
+  ending(dt, endT) {
     const d = this.blasted;
-    if (d && !this.twinkled && (d.flyT > 2.3 || d.camDist > 150)) {
+    if (!d || this.twinkled) return;
+    this.g.skyFollow(d.group.position); // the crash camera tilts up to watch it go
+    if (d.flyT > 3.3 || d.camDist > 160) {
       this.twinkled = true;
+      this.twinkleAt = endT;
       this.g.fx.twinkle(d.group.position, this.g.camPos);
       this.g.audio.twinkle();
       this.g.deer.release(d);
     }
+  }
+
+  // Earliest time the game-over card may appear: after the twinkle has played.
+  endHold() {
+    if (!this.blasted) return 0;
+    return this.twinkled ? this.twinkleAt + 1.0 : Infinity;
   }
 
   onHorn() {

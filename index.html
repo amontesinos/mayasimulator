@@ -69,10 +69,13 @@
 
   <section id="s-calib" class="screen hidden">
     <div class="calib">
-      <div class="calib-phone">📱</div>
-      <div class="calib-text" id="c-text">Hold your phone sideways like a steering wheel</div>
+      <div class="level" id="c-level" aria-hidden="true">
+        <div class="level-tube"><div class="level-mark"></div><div class="level-bubble" id="c-bubble"></div></div>
+      </div>
+      <div class="calib-text" id="c-text">Calibrating steering…</div>
       <div class="calib-count" id="c-count">3</div>
-      <div class="calib-sub">Hold steady — this angle will be "straight"</div>
+      <div class="calib-bar"><div id="c-bar"></div></div>
+      <div class="calib-sub" id="c-sub">Hold your phone level, like a steering wheel</div>
     </div>
   </section>
 
