@@ -88,71 +88,72 @@ export function makeRoadTexture(spec, aniso) {
 }
 
 // Leaping deer silhouette (like the yellow road sign), centered at cx,cy.
+// One continuous outline (body, neck, head, tucked forelegs, hind legs
+// stretched back) so it reads as a single smooth shape, plus thin antlers.
+// DEER_CX/CY: the drawing's visual center (between its bounding box and the
+// centroid of its filled area, measured from a render): the thin antlers pull
+// the box up while the body's weight sits lower, so the box alone looks low.
+const DEER_CX = -2.2, DEER_CY = -10.2;
 export function drawLeapingDeer(g, cx, cy, size, color) {
   g.save();
   g.translate(cx, cy);
   const k = size / 100;
   g.scale(k, k);
-  g.translate(7, 11);
+  g.translate(-DEER_CX, -DEER_CY);
   g.fillStyle = color;
   g.strokeStyle = color;
-  g.lineCap = 'round';
   g.lineJoin = 'round';
-  g.save();
-  g.rotate(-0.32);
   g.beginPath();
-  g.ellipse(-4, 6, 27, 11.5, 0, 0, Math.PI * 2);
+  g.moveTo(-36, -11); // top of the rump
+  g.quadraticCurveTo(-14, -20, 8, -16); // back
+  g.quadraticCurveTo(14, -18, 18, -24); // withers into the neck
+  g.lineTo(22, -34); // back of the neck
+  g.lineTo(18, -43); // ear
+  g.lineTo(26, -37);
+  g.quadraticCurveTo(33, -41, 40, -35); // forehead
+  g.lineTo(47, -29); // muzzle
+  g.quadraticCurveTo(47, -25, 43, -25); // nose
+  g.quadraticCurveTo(36, -24, 31, -21); // jaw
+  g.quadraticCurveTo(28, -12, 27, -4); // throat down to the chest
+  g.lineTo(36, 2); // front foreleg, tucked forward
+  g.lineTo(44, 12);
+  g.lineTo(41, 15);
+  g.lineTo(32, 6);
+  g.lineTo(24, 4);
+  g.lineTo(26, 12); // other foreleg
+  g.lineTo(31, 22);
+  g.lineTo(27, 24);
+  g.lineTo(19, 12);
+  g.lineTo(14, 7);
+  g.quadraticCurveTo(-2, 12, -18, 8); // belly
+  g.lineTo(-24, 14); // near hind leg, stretched back and down
+  g.lineTo(-36, 24);
+  g.lineTo(-45, 31);
+  g.lineTo(-48, 28);
+  g.lineTo(-38, 18);
+  g.lineTo(-33, 12);
+  g.lineTo(-42, 16); // far hind leg, a little higher
+  g.lineTo(-52, 22);
+  g.lineTo(-54, 19);
+  g.lineTo(-44, 8);
+  g.quadraticCurveTo(-45, -2, -41, -6); // up the back of the rump
+  g.lineTo(-46, -10); // tail, flicked up
+  g.quadraticCurveTo(-43, -14, -36, -11);
+  g.closePath();
   g.fill();
-  g.restore();
-  g.lineWidth = 10;
+  // antlers
+  g.lineCap = 'round';
+  g.lineWidth = 2.8;
   g.beginPath();
-  g.moveTo(14, -6);
-  g.lineTo(24, -22);
-  g.stroke();
-  g.save();
-  g.translate(30, -26);
-  g.rotate(0.35);
-  g.beginPath();
-  g.ellipse(0, 0, 9.5, 5.5, 0, 0, Math.PI * 2);
-  g.fill();
-  g.restore();
-  g.lineWidth = 4;
-  g.beginPath();
-  g.moveTo(24, -29);
-  g.lineTo(19, -35);
-  g.stroke();
-  g.lineWidth = 3;
-  g.beginPath();
-  g.moveTo(26, -31);
-  g.quadraticCurveTo(22, -46, 34, -50);
-  g.moveTo(24, -40);
-  g.lineTo(17, -46);
-  g.moveTo(28, -46);
-  g.lineTo(27, -55);
-  g.stroke();
-  g.lineWidth = 6;
-  g.beginPath();
-  g.moveTo(12, 0);
-  g.lineTo(24, 6);
-  g.lineTo(34, 0);
-  g.moveTo(8, 4);
-  g.lineTo(19, 14);
-  g.lineTo(30, 13);
-  g.moveTo(-22, 14);
-  g.lineTo(-36, 22);
-  g.lineTo(-50, 32);
-  g.moveTo(-26, 10);
-  g.lineTo(-42, 12);
-  g.lineTo(-54, 21);
-  g.stroke();
-  g.lineWidth = 5;
-  g.beginPath();
-  g.moveTo(-28, 4);
-  g.lineTo(-35, -3);
+  g.moveTo(27, -38);
+  g.quadraticCurveTo(24, -50, 31, -57); // main beam
+  g.moveTo(25.5, -46);
+  g.lineTo(19, -52); // brow tine
+  g.moveTo(26.5, -52);
+  g.lineTo(23, -60); // upper tine
   g.stroke();
   g.restore();
 }
-
 function drawCurveArrow(g, cx, cy, dir) {
   g.save();
   g.translate(cx, cy);
@@ -198,7 +199,7 @@ export function paintDeerSign(g, S) {
   g.clearRect(0, 0, S, S);
   g.scale(S / 256, S / 256);
   diamond(g, 256);
-  drawLeapingDeer(g, 128, 134, 118, '#151515');
+  drawLeapingDeer(g, 128, 128, 124, '#151515');
   g.restore();
 }
 
@@ -207,7 +208,7 @@ export function makeWarningSign(kind, aniso) {
   const S = 256;
   const [c, g] = makeCanvas(S, S);
   diamond(g, S);
-  if (kind === 'deer') drawLeapingDeer(g, S / 2, S / 2 + 6, 118, '#151515');
+  if (kind === 'deer') drawLeapingDeer(g, S / 2, S / 2, 124, '#151515');
   else drawCurveArrow(g, S / 2, S / 2, kind === 'curveL' ? -1 : 1);
   return canvasTexture(c, { aniso });
 }
