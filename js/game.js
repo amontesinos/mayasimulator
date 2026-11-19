@@ -462,7 +462,7 @@ export class Game {
 
     this._placeCamera(dt);
     this.deer.update(dt, this.camPos, this.camFwd);
-    this.traffic.update(dt, this.roadSpec.lanes);
+    this.traffic.update(dt, this.roadSpec.lanes, { s: car.s, d: car.d, v: car.v, len: CAR_HALF_L * 2 });
     this.world.update(car.s, this.camPos, dt);
     this.fx.update(dt);
 

@@ -858,11 +858,33 @@ export class RevengeMode {
     car.d += push * 0.35;
     car.rel = -push * 0.06;
     tc.v *= 0.85;
-    tc.targetD = tc.d - push * 0.6;
     tc.hitPlayer = true;
     g.bonkFx(tc.group.position, false);
     setTimeout(() => g.audio.honk(0.55, 0.8), 250);
     g.toast(pick(r, ['Sorry!', 'Oops!', 'My bad!', 'Insurance will cover it!']), 'warn', 1300);
+  }
+
+  // Cars never sit inside each other: shove the traffic car clear of the
+  // player along whichever way it overlaps least. A side swipe pushes it
+  // over (toward the next lane away from you); a nose-to-tail bump pushes it
+  // ahead or behind and matches speeds.
+  separate(tc, ds, dd, overS, overD) {
+    const car = this.g.car, lanes = this.g.roadSpec.lanes;
+    if (overD < overS) {
+      const side = Math.sign(dd) || 1;
+      const lo = lanes[0] - 0.6, hi = lanes[lanes.length - 1] + 0.6;
+      tc.d = clamp(tc.d + side * (overD + 0.05), lo, hi);
+      const away = lanes.filter((l) => Math.sign(l - car.d) === side);
+      tc.targetD = away.length
+        ? away.reduce((a, b) => (Math.abs(b - tc.d) < Math.abs(a - tc.d) ? b : a))
+        : clamp(tc.d, lo, hi);
+    } else if (ds >= 0) {
+      tc.s += overS + 0.05;
+      tc.v = Math.max(tc.v, car.v);
+    } else {
+      tc.s -= overS + 0.05;
+      tc.v = Math.min(tc.v, car.v);
+    }
   }
 
   onHorn() {
@@ -899,7 +921,11 @@ export class RevengeMode {
     for (const tc of [...g.traffic.active]) {
       const ds = tc.s - car.s, dd = tc.d - car.d;
       const half = tc.len / 2 + 2.2;
-      if (this.invuln <= 0 && Math.abs(ds) < half - 0.2 && Math.abs(dd) < 1.82) this.crash(tc);
+      const overS = half - 0.2 - Math.abs(ds), overD = 1.82 - Math.abs(dd);
+      if (overS > 0 && overD > 0) {
+        if (this.invuln <= 0) this.crash(tc);
+        this.separate(tc, ds, dd, overS, overD);
+      }
       if (!tc.passed && ds < -half) {
         tc.passed = true;
         if (!tc.hitPlayer && Math.abs(dd) < 1.85 + 1.0) {

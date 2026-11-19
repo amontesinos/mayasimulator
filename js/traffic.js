@@ -77,7 +77,8 @@ export class TrafficManager {
     tc.body.geometry = this._body(type, color);
     if (!this.lights[type]) this.lights[type] = lightGeo(type);
     tc.lightMesh.geometry = this.lights[type];
-    Object.assign(tc, { s, d, v, targetD: d, type, len: LEN[type], passed: false, hitPlayer: false, laneT: 3 + r() * 8, rng: r });
+    // v0: the speed this driver likes to cruise at; v drops below it when someone is in the way
+    Object.assign(tc, { s, d, v, v0: v, targetD: d, type, len: LEN[type], passed: false, hitPlayer: false, laneT: 3 + r() * 8, rng: r });
     this.world.dynamic.add(tc.group);
     this.active.push(tc);
     return tc;
@@ -94,19 +95,67 @@ export class TrafficManager {
     for (const t of [...this.active]) this.release(t);
   }
 
-  update(dt, lanes) {
-    const road = this.world.road;
-    for (const tc of this.active) {
-      tc.s += tc.v * dt;
+  // Is the stretch of lane `target` around this car free to move into? Counts
+  // cars already in it and cars heading into it, with extra room for anyone
+  // closing in fast. The player's car (when given) gets a wider berth.
+  _laneClear(tc, target, player) {
+    const room = (o, extra) => {
+      const ds = o.s - tc.s, base = (o.len + tc.len) / 2 + extra;
+      return ds >= 0 ? ds > base + Math.max(0, tc.v - o.v) * 2 : -ds > base + Math.max(0, o.v - tc.v) * 2.5;
+    };
+    for (const o of this.active) {
+      if (o === tc) continue;
+      if ((Math.abs(o.d - target) < 1.9 || Math.abs(o.targetD - target) < 1.9) && !room(o, 8)) return false;
+    }
+    return !(player && Math.abs(player.d - target) < 2.4 && !room(player, 12));
+  }
+
+  // Traffic drives like traffic: each car follows whoever is ahead in its lane
+  // (another car or the player), slowing to keep a gap and never passing
+  // through, and only changes lanes into a real gap.
+  // player: { s, d, v, len } of the player's car, if there is one.
+  update(dt, lanes, player = null) {
+    const road = this.world.road, act = this.active;
+    const overlapLat = (tc, o) =>
+      Math.min(Math.abs(o.d - tc.d), Math.abs(o.targetD - tc.d), Math.abs(o.d - tc.targetD)) < 1.9;
+    for (const tc of act) {
       tc.laneT -= dt;
-      if (lanes && tc.laneT < 0) {
+      // only start a lane change once settled in a lane
+      if (lanes && tc.laneT < 0 && Math.abs(tc.targetD - tc.d) < 0.05) {
         tc.laneT = 5 + tc.rng() * 9;
         const cur = lanes.reduce((a, b) => (Math.abs(b - tc.d) < Math.abs(a - tc.d) ? b : a));
         const opts = lanes.filter((l) => Math.abs(l - cur) > 1 && Math.abs(l - cur) < 4.5);
         const target = opts[Math.floor(tc.rng() * opts.length)];
-        const blocked = this.active.some((o) => o !== tc && Math.abs(o.d - target) < 1.6 && Math.abs(o.s - tc.s) < 14);
-        if (target !== undefined && !blocked) tc.targetD = target;
+        if (target !== undefined && this._laneClear(tc, target, player)) tc.targetD = target;
       }
+      // follow the nearest car ahead that shares the lane
+      let gap = Infinity, leadV = 0;
+      for (const o of act) {
+        if (o === tc || o.s <= tc.s || !overlapLat(tc, o)) continue;
+        const g = o.s - tc.s - (o.len + tc.len) / 2;
+        if (g < gap) { gap = g; leadV = o.v; }
+      }
+      if (player && player.s > tc.s && Math.min(Math.abs(player.d - tc.d), Math.abs(player.d - tc.targetD)) < 2.0) {
+        const g = player.s - tc.s - (player.len + tc.len) / 2;
+        if (g < gap) { gap = g; leadV = player.v; }
+      }
+      let want = tc.v0;
+      if (gap < 8 + tc.v * 1.2) want = Math.min(want, leadV + (gap - 4) * 0.9);
+      tc.v = clamp(tc.v + clamp(Math.max(0, want) - tc.v, -10 * dt, 2.5 * dt), 0, tc.v0 * 1.2);
+      tc.s += tc.v * dt;
+    }
+    // safety net: two cars sharing a lane never overlap; the one behind waits
+    for (const a of act) {
+      for (const b of act) {
+        if (a === b || b.s < a.s || Math.abs(a.d - b.d) >= 1.85) continue;
+        const min = (a.len + b.len) / 2 + 0.4;
+        if (b.s - a.s < min) {
+          a.s = b.s - min;
+          a.v = Math.min(a.v, b.v);
+        }
+      }
+    }
+    for (const tc of act) {
       const step = clamp(tc.targetD - tc.d, -1.3 * dt, 1.3 * dt);
       tc.d += step;
       const yaw = road.toWorld(tc.s, tc.d, _p);
