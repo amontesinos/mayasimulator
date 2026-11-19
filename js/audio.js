@@ -97,6 +97,7 @@ export class AudioEngine {
     this.revSend.connect(this.reverb);
     this.reverb.connect(this.music);
     this._buildEngine();
+    this._buildScreech();
   }
 
   _noiseBuf(brown) {
@@ -174,6 +175,60 @@ export class AudioEngine {
     this._loop(this.white, this._filter('bandpass', 1400, 0.7, this.gravelG));
     this.windG = this._gain(0, this.sfx);
     this._loop(this.white, this._filter('bandpass', 600, 0.4, this.windG));
+  }
+
+  // Tire squeal: a wavering ~1 kHz tone with a rubbery undertone and some
+  // grit. Always running at zero volume; setScreech() fades it in and out.
+  _buildScreech() {
+    const c = this.ctx;
+    this.scrOut = this._gain(0, this.sfx);
+    this.scrLevel = 0;
+    const chatter = this._gain(1, this.scrOut); // stick-slip roughness (amplitude wobble)
+    const tone = this._filter('lowpass', 4500, 0.7, chatter);
+    const body = this._filter('highpass', 500, 0.7, tone);
+    const band = this._filter('bandpass', 1300, 1.6, body);
+    this.scrOsc = [];
+    for (const [type, mult, g] of [['sawtooth', 1, 0.45], ['sawtooth', 1.007, 0.35], ['square', 0.5, 0.12]]) {
+      const o = c.createOscillator();
+      o.type = type;
+      o.frequency.value = 1000 * mult;
+      o.connect(this._gain(g, band));
+      o.start();
+      this.scrOsc.push([o, mult]);
+    }
+    // pitch waver (in cents): two slow LFOs plus filtered noise for irregular jitter
+    const wobble = (src, cents) => {
+      const g = this._gain(cents);
+      src.connect(g);
+      for (const [o] of this.scrOsc) g.connect(o.detune);
+    };
+    for (const [f, cents] of [[5.5, 30], [13, 12]]) {
+      const lfo = c.createOscillator();
+      lfo.frequency.value = f;
+      lfo.start();
+      wobble(lfo, cents);
+    }
+    const jitter = this._filter('lowpass', 20, 0.7);
+    this._loop(this.brown, jitter);
+    wobble(jitter, 60);
+    const am = c.createOscillator();
+    am.frequency.value = 28;
+    am.connect(this._gain(0.25, chatter.gain));
+    am.start();
+    // tire hiss
+    this._loop(this.white, this._filter('bandpass', 3000, 0.9, this._gain(0.15, this.scrOut)));
+  }
+
+  // level 0..1 (0 = silent); the squeal drops in pitch as the car slows.
+  setScreech(level, speed) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.scrOut.gain.setTargetAtTime(level * 0.22, t, level > this.scrLevel ? 0.02 : 0.07);
+    this.scrLevel = level;
+    if (level > 0) {
+      const f = 880 + 300 * Math.min(1, speed / 25);
+      for (const [o, mult] of this.scrOsc) o.frequency.setTargetAtTime(f * mult, t, 0.08);
+    }
   }
 
   setDrive({ rpm, throttle, speed, offroad, on }) {

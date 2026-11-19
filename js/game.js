@@ -9,7 +9,7 @@ import { DeerManager } from './deer.js';
 import { TrafficManager } from './traffic.js';
 import { CrashFX } from './fx.js';
 import { MODES } from './modes.js';
-import { clamp, damp, lerp, MPH, DEG } from './util.js';
+import { clamp, damp, lerp, smoothstep, MPH, DEG } from './util.js';
 
 // pavedL/R: where off-road slowdown starts. hardL/R: the furthest the car can go
 // (a bounce in Chill Cruise; a crash in the modes where crashing ends the run).
@@ -432,6 +432,16 @@ export class Game {
     }
     const engineOn = !(this.boom && this.boom.exploded);
     this.audio.setDrive({ rpm: car.rpm, throttle: input.throttle || 0, speed: car.v, offroad: car.offroad > 0 ? 1 : 0, on: engineOn });
+    // Tire screech while braking at speed: a sharp bite when the brake goes on,
+    // easing off as it's held, fading out as the car slows to a stop.
+    const brake = params.coast ? 0 : input.brake || 0;
+    this.brakeT = brake > 0 && car.v > 3 ? (this.brakeT || 0) + dt : 0;
+    let screech = 0;
+    if (this.brakeT > 0) {
+      const bite = this.brakeT < 0.35 ? 1 : Math.max(0.55, 1 - (this.brakeT - 0.35) * 0.5);
+      screech = bite * brake * smoothstep(3, 13, car.v) * (car.offroad > 0 ? 0.3 : 1);
+    }
+    this.audio.setScreech(screech, car.v);
   }
 
   // KABOOM: fireball, debris, charred wreck.
