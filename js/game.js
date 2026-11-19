@@ -20,6 +20,11 @@ const LIMITS = {
 };
 const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
 const CALIB_STEP = 1.0; // seconds per number in the 3-2-1 calibration countdown
+const CAR_HALF_L = 2.1; // the car's footprint for roadside obstacle hits (m)
+const CAR_HALF_W = 0.86;
+// Off-road things the car can't push through: it stops dead against them.
+// (Signs and posts give way; guardrails and barriers are glanced off.)
+const IMMOVABLE = new Set(['tree', 'forest', 'rock']);
 
 export class Game {
   constructor({ canvas, ui, input, audio, store }) {
@@ -209,7 +214,8 @@ export class Game {
 
   // reason: 'bonk' (last heart lost to a deer), 'crash' (hit something off the
   // road), or 'caught' (Deer Revenge herd). The first two blow up the car.
-  endRun(reason, kind = null) {
+  // ob: the roadside obstacle that was hit, if it was one.
+  endRun(reason, kind = null, ob = null) {
     if (this.state !== 'playing') return;
     this.state = 'ending';
     this.endT = 0;
@@ -219,14 +225,26 @@ export class Game {
     this.input.clearTouches();
     this.skyT = this.skyLook = 0;
     if (reason === 'bonk' || reason === 'crash') {
-      this.boom = { exploded: false, stopT: null };
-      // The car keeps its momentum: it rolls on, explodes, and slides to a halt.
-      if (reason === 'crash') {
-        this.car.v *= 0.55;
-        this.car.rel = (Math.sign(this.car.d) || 1) * 0.3; // glance off, back toward the road
-      } else this.car.v *= 0.85;
+      // pinned: stopped dead against something immovable
+      const pinned = reason === 'crash' && IMMOVABLE.has(kind);
+      this.boom = { exploded: false, stopT: null, pinned };
       this.audio.crunch();
-      this.shake = 0.9;
+      if (pinned) {
+        // Trees and rocks don't give: the car stops right there, its crumpled
+        // bumper against the trunk, and blows up where it stands.
+        if (ob) this._backOff(ob);
+        this.car.v = 0;
+        this.audio.thud();
+        this.shake = 1.3;
+      } else {
+        // Otherwise the car keeps its momentum: it rolls on, explodes, and slides
+        // to a halt (glancing off a sign, post, guardrail or barrier back toward the road).
+        if (reason === 'crash') {
+          this.car.v *= 0.55;
+          this.car.rel = (Math.sign(this.car.d) || 1) * 0.3;
+        } else this.car.v *= 0.85;
+        this.shake = 0.9;
+      }
       this.ui.crack.clear();
       this.fx.placeWreck(this.rig);
       // pull the camera out of the driver's seat to watch the car
@@ -242,11 +260,21 @@ export class Game {
   }
 
   // Off-road impact: all hearts gone at once.
-  crash(kind) {
+  crash(kind, ob = null) {
     if (this.state !== 'playing') return;
     if (this.mode.lives != null) this.mode.lives = 0;
     this.ui.setHud(this.mode.hud());
-    this.endRun('crash', kind);
+    this.endRun('crash', kind, ob);
+  }
+
+  // Back the car out of an obstacle it ran into (the hit is caught a frame
+  // late), leaving the front a little crumpled into it.
+  _backOff(ob) {
+    const car = this.car;
+    const ps = CAR_HALF_L + ob.r - Math.abs(ob.s - car.s); // overlap along the road
+    const pd = CAR_HALF_W + ob.r - Math.abs(ob.d - car.d); // overlap across it
+    if (ps < pd) car.s -= Math.sign(ob.s - car.s) * Math.max(0, ps - 0.25);
+    else car.d -= Math.sign(ob.d - car.d) * Math.max(0, pd - 0.1);
   }
 
   showGameOver() {
@@ -371,19 +399,19 @@ export class Game {
       M.update(dt);
       // In Deer Dodge and Deer Revenge, hitting anything off the road ends the run.
       if (this.state === 'playing' && M.constructor.crash) {
-        let kind = null;
+        let kind = null, ob = null;
         if (car.scrape) kind = this.roadSpec.lanes.length === 3 ? (car.d < 0 ? 'barrier' : 'guardrail') : 'forest';
         else {
-          const ob = this.world.hitObstacle(car.s, car.d, 2.1, 0.86);
+          ob = this.world.hitObstacle(car.s, car.d, CAR_HALF_L, CAR_HALF_W);
           if (ob) kind = ob.kind;
         }
-        if (kind) this.crash(kind);
+        if (kind) this.crash(kind, ob);
       }
       if (car.scrape && !this.scraping) this.audio.scrape();
       this.scraping = car.scrape > 0;
     } else if (st === 'ending') {
       this.endT += dt;
-      if (this.boom && !this.boom.exploded && this.endT > 0.55) this.detonate();
+      if (this.boom && !this.boom.exploded && this.endT > (this.boom.pinned ? 0.4 : 0.55)) this.detonate();
       if (M.ending) M.ending(dt, this.endT);
       let endAt = 3.6;
       if (this.boom) {
@@ -448,7 +476,7 @@ export class Game {
   detonate() {
     this.boom.exploded = true;
     const vel = this.carVel.set(0, 0, -1).applyQuaternion(this.rig.quaternion).multiplyScalar(this.car.v);
-    this.fx.explode(vel);
+    this.fx.explode(vel, this.boom.pinned);
     this.audio.explosion();
     this.ui.clearToasts();
     this.ui.flash();

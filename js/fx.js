@@ -291,7 +291,9 @@ export class CrashFX {
   }
 
   // carVel: the car's world velocity at the moment of the blast (pieces keep it).
-  explode(carVel) {
+  // pinned: the car is stopped dead against a tree or rock, so the blast only
+  // bucks it up and drops it back in place (no barrel roll, no spinning slide).
+  explode(carVel, pinned = false) {
     const c = this.tmp.copy(this.wreck.position);
     const iv = carVel || ZERO;
     this.debrisGround = this.ground;
@@ -334,12 +336,18 @@ export class CrashFX {
     // on its roof (or all the way around onto its wheels), then spins as it slides.
     this.wreckBody.material = this.charMat;
     this.wreckLights.material = this.deadLightMat;
-    this.vy = 7.5;
-    this.airborne = true;
     const dir = Math.random() < 0.5 ? -1 : 1;
-    this.rollTarget = dir * (Math.random() < 0.7 ? Math.PI : Math.PI * 2);
+    this.airborne = true;
+    if (pinned) {
+      this.vy = 3.6;
+      this.rollTarget = dir * rand(Math.random, 0.06, 0.14); // lands slightly askew
+      this.spinYaw = dir * rand(Math.random, 0.08, 0.16);
+    } else {
+      this.vy = 7.5;
+      this.rollTarget = dir * (Math.random() < 0.7 ? Math.PI : Math.PI * 2);
+      this.spinYaw = (Math.random() < 0.5 ? -1 : 1) * rand(Math.random, 1.6, 3.2);
+    }
     this.spinRoll = this.rollTarget / ((2 * this.vy) / 18);
-    this.spinYaw = (Math.random() < 0.5 ? -1 : 1) * rand(Math.random, 1.6, 3.2);
     this.burning = true;
     this.burnT = 0;
     this.fireAcc = 0;

@@ -357,6 +357,14 @@ export class AudioEngine {
     for (let i = 0; i < 6; i++) this._tone('triangle', 2400 + Math.random() * 2400, t + 0.05 + i * 0.04, 0.12, 0.05);
   }
 
+  // Heavy impact against something that doesn't give (a tree, a rock).
+  thud() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone('sine', 74, t, 0.45, 1.0, null, 30);
+    this._noise(t, 0.25, 0.6, 'lowpass', 700, 0.8, null, 120);
+  }
+
   explosion() {
     if (!this.ctx) return;
     const c = this.ctx, t = c.currentTime;
