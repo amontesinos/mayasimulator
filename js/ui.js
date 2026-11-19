@@ -1,102 +1,13 @@
-// DOM overlay: screens, HUD, toasts, the BONK pop, and windshield cracks.
-import { mulberry32, fmt } from './util.js';
+// DOM overlay: screens, HUD, toasts and the BONK pop.
+import { fmt } from './util.js';
 import { paintDeerSign } from './textures.js';
 
 const $ = (id) => document.getElementById(id);
 const clampUnit = (v) => Math.min(1, Math.max(0, v));
 
-class CrackLayer {
-  constructor(canvas) {
-    this.c = canvas;
-    this.g = canvas.getContext('2d');
-    this.cracks = [];
-    this.dpr = 1;
-  }
-
-  resize() {
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.c.width = Math.round(window.innerWidth * this.dpr);
-    this.c.height = Math.round(window.innerHeight * this.dpr);
-    this.redraw();
-  }
-
-  clear() {
-    this.cracks = [];
-    this.redraw();
-  }
-
-  add(x, y) {
-    this.cracks.push({ x, y, seed: (Math.random() * 1e9) | 0, size: 0.17 + Math.random() * 0.06 });
-    this.redraw();
-  }
-
-  redraw() {
-    const g = this.g, W = window.innerWidth, H = window.innerHeight;
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(0, 0, this.c.width, this.c.height);
-    if (!this.cracks.length) return;
-    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    g.save();
-    g.beginPath();
-    g.rect(0, 0, W, H * 0.6);
-    g.clip();
-    for (const ck of this.cracks) this._draw(g, ck.x * W, ck.y * H, ck.size * Math.min(W, H * 2), ck.seed);
-    g.restore();
-  }
-
-  _draw(g, x, y, r, seed) {
-    const rnd = mulberry32(seed);
-    const n = 10 + Math.floor(rnd() * 5);
-    const rays = [];
-    g.lineCap = 'round';
-    g.lineJoin = 'round';
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + rnd() * 0.45;
-      const len = r * (0.45 + rnd() * 0.85);
-      const pts = [[x, y]];
-      for (let k = 1; k <= 6; k++) {
-        const aa = a + (rnd() - 0.5) * 0.32;
-        pts.push([x + Math.cos(aa) * len * (k / 6), y + Math.sin(aa) * len * (k / 6)]);
-      }
-      rays.push(pts);
-    }
-    for (const pass of [0, 1]) {
-      g.strokeStyle = pass ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.35)';
-      g.lineWidth = pass ? 1.3 : 2.6;
-      for (const pts of rays) {
-        g.beginPath();
-        g.moveTo(pts[0][0], pts[0][1]);
-        for (const p of pts) g.lineTo(p[0], p[1]);
-        g.stroke();
-      }
-      for (const ring of [1, 2, 4]) {
-        g.beginPath();
-        rays.forEach((pts, i) => {
-          const p = pts[Math.min(ring, pts.length - 1)];
-          const jx = (rnd() - 0.5) * 5, jy = (rnd() - 0.5) * 5;
-          if (i === 0) g.moveTo(p[0] + jx, p[1] + jy);
-          else g.lineTo(p[0] + jx, p[1] + jy);
-        });
-        g.closePath();
-        g.globalAlpha = 0.55;
-        g.stroke();
-        g.globalAlpha = 1;
-      }
-    }
-    const grd = g.createRadialGradient(x, y, 0, x, y, r * 0.14);
-    grd.addColorStop(0, 'rgba(255,255,255,0.7)');
-    grd.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grd;
-    g.beginPath();
-    g.arc(x, y, r * 0.14, 0, Math.PI * 2);
-    g.fill();
-  }
-}
-
 export class UI {
   constructor() {
     this.screens = ['s-title', 's-calib', 's-pause', 's-over', 's-modes'];
-    this.crack = new CrackLayer($('crack'));
     this.lastMid = '';
     const sign = $('t-sign');
     if (sign) paintDeerSign(sign.getContext('2d'), sign.width);
@@ -253,7 +164,5 @@ export class UI {
     if (text) $('loading-text').textContent = text;
   }
 
-  resize() {
-    this.crack.resize();
-  }
+  resize() {}
 }

@@ -7,9 +7,105 @@
 // The car centerline is at x = CAR_X.
 import * as THREE from '../vendor/three.module.min.js';
 import { makeCanvas, canvasTexture, COMIC_FONT } from './textures.js';
-import { clamp, damp, lerp, smoothstep, DEG } from './util.js';
+import { clamp, damp, lerp, smoothstep, DEG, mulberry32 } from './util.js';
 
 export const CAR_X = 0.37;
+
+// Cracks painted onto a transparent sheet lying in the windshield's plane, so
+// the wheel, dash, mirror and pillars in front of the glass hide them.
+// add() takes a normalized screen point and raycasts it onto the glass.
+const GLASS_W = 2.2, GLASS_H = 0.73;
+const GLASS_PX = 3072 / GLASS_W; // texture pixels per meter
+class WindshieldCracks {
+  constructor(parent, camera) {
+    this.camera = camera;
+    [this.c, this.g] = makeCanvas(3072, Math.round(GLASS_H * GLASS_PX));
+    this.tex = canvasTexture(this.c, { aniso: 4 });
+    this.mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(GLASS_W, GLASS_H),
+      new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    // base of the glass at (y -0.31, z -1.0), top under the headliner at (0.22, -0.47)
+    this.mesh.position.set(CAR_X, -0.045, -0.735);
+    this.mesh.rotation.x = Math.atan2(0.53, 0.53);
+    this.mesh.visible = false;
+    parent.add(this.mesh);
+    this.ray = new THREE.Raycaster();
+    this.ndc = new THREE.Vector2();
+  }
+
+  clear() {
+    if (!this.mesh.visible) return;
+    this.g.clearRect(0, 0, this.c.width, this.c.height);
+    this.tex.needsUpdate = true;
+    this.mesh.visible = false;
+  }
+
+  add(nx, ny) {
+    this.camera.updateMatrixWorld();
+    this.mesh.updateMatrixWorld();
+    // walk toward the middle of the view if the point lands on the dash or roof
+    for (let k = 0; k < 6; k++) {
+      const y = lerp(ny, 0.35, k / 5);
+      this.ndc.set(nx * 2 - 1, 1 - y * 2);
+      this.ray.setFromCamera(this.ndc, this.camera);
+      const hit = this.ray.intersectObject(this.mesh)[0];
+      if (!hit || !hit.uv) continue;
+      this._draw(hit.uv.x * this.c.width, (1 - hit.uv.y) * this.c.height, (0.24 + Math.random() * 0.08) * GLASS_PX, (Math.random() * 1e9) | 0);
+      this.tex.needsUpdate = true;
+      this.mesh.visible = true;
+      return;
+    }
+  }
+
+  _draw(x, y, r, seed) {
+    const g = this.g, rnd = mulberry32(seed), s = GLASS_PX / 900;
+    const n = 10 + Math.floor(rnd() * 5);
+    const rays = [];
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + rnd() * 0.45;
+      const len = r * (0.45 + rnd() * 0.85);
+      const pts = [[x, y]];
+      for (let k = 1; k <= 6; k++) {
+        const aa = a + (rnd() - 0.5) * 0.32;
+        pts.push([x + Math.cos(aa) * len * (k / 6), y + Math.sin(aa) * len * (k / 6)]);
+      }
+      rays.push(pts);
+    }
+    for (const pass of [0, 1]) {
+      g.strokeStyle = pass ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.35)';
+      g.lineWidth = (pass ? 1.4 : 2.8) * s;
+      for (const pts of rays) {
+        g.beginPath();
+        g.moveTo(pts[0][0], pts[0][1]);
+        for (const p of pts) g.lineTo(p[0], p[1]);
+        g.stroke();
+      }
+      for (const ring of [1, 2, 4]) {
+        g.beginPath();
+        rays.forEach((pts, i) => {
+          const p = pts[Math.min(ring, pts.length - 1)];
+          const jx = (rnd() - 0.5) * 5 * s, jy = (rnd() - 0.5) * 5 * s;
+          if (i === 0) g.moveTo(p[0] + jx, p[1] + jy);
+          else g.lineTo(p[0] + jx, p[1] + jy);
+        });
+        g.closePath();
+        g.globalAlpha = 0.55;
+        g.stroke();
+        g.globalAlpha = 1;
+      }
+    }
+    const grd = g.createRadialGradient(x, y, 0, x, y, r * 0.14);
+    grd.addColorStop(0, 'rgba(255,255,255,0.7)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(x, y, r * 0.14, 0, Math.PI * 2);
+    g.fill();
+  }
+}
 const UP = new THREE.Vector3(0, 1, 0);
 const FONT = 'Arial, Helvetica, sans-serif';
 const gaugeRot = (f) => (-(135 + 270 * clamp(f, 0, 1)) - 90) * DEG;
@@ -194,6 +290,7 @@ export class Cockpit {
     this.lastMph = -1;
     this.hoodDeer = null;
     this._build();
+    this.cracks = new WindshieldCracks(this.scene, this.camera);
   }
 
   _build() {
@@ -444,18 +541,33 @@ export class Cockpit {
     glass.position.z = 0.0145;
     mg.add(glass);
 
+    // --- the door's front upper trim: rises from the window ledge to dash
+    // height and runs forward to the windshield, so the dash ends against it
+    // instead of hanging out over the door (profile in z/y, extruded across x)
+    const cap = new THREE.Shape();
+    cap.moveTo(1.04, -0.34); // shape x = -z
+    cap.lineTo(1.04, -0.252);
+    cap.quadraticCurveTo(0.8, -0.245, 0.64, -0.25); // top, level with the dash lip
+    cap.quadraticCurveTo(0.56, -0.26, 0.5, -0.297); // sloping down to the window ledge
+    cap.lineTo(0.5, -0.34);
+    cap.closePath();
+    const capGeo = new THREE.ExtrudeGeometry(cap, { depth: 0.075, bevelEnabled: false, curveSegments: 8 });
+    capGeo.rotateY(Math.PI / 2);
+    B.add(capGeo, M.dash, xf(-0.53, 0, 0));
+
     // --- left side mirror, mounted where it is on the real car: on the door's
     // front corner. Inside, that corner is a black triangular "sail" panel
-    // between the A-pillar base and the window ledge; the mirror's arm runs
-    // from behind it out to a rounded white housing whose glass faces the driver.
-    const sail = new THREE.Shape();
-    sail.moveTo(1.0, -0.312); // shape x = -z: A-pillar base
-    sail.lineTo(0.76, -0.3); // back along the window ledge
-    sail.lineTo(0.85, -0.17); // up the A-pillar
-    sail.closePath();
-    const sailGeo = new THREE.ExtrudeGeometry(sail, { depth: 0.045, bevelEnabled: false });
-    sailGeo.rotateY(Math.PI / 2);
-    B.add(sailGeo, M.rubber, xf(-0.525, 0, 0));
+    // filling the corner between the A-pillar and the door trim; its front edge
+    // runs along the pillar's center line so the pillar covers it. The mirror's
+    // arm runs from behind it out to a rounded white housing facing the driver.
+    const pillarAt = (y) => {
+      const t = (y + 0.31) / 0.52; // the A-pillar runs (-0.44,-0.31,-1.0) -> (-0.68,0.21,-0.45)
+      return V(-0.44 - 0.24 * t, y, -1.0 + 0.55 * t);
+    };
+    const sa = pillarAt(-0.25), sb = pillarAt(-0.15), sc3 = V(-0.5, -0.262, -0.76);
+    const sailGeo = new THREE.BufferGeometry().setFromPoints([sa, sc3, sb, sa, sb, sc3]); // both faces
+    sailGeo.computeVertexNormals();
+    B.add(sailGeo, M.rubber);
     const sm = frameOf(R, -0.74, -0.23, -0.8, 0, 0.75, 0);
     const hGeo = new THREE.ExtrudeGeometry(roundRect(0.2, 0.115, 0.04), {
       depth: 0.06, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.012, bevelSegments: 3, curveSegments: 8,
@@ -463,7 +575,7 @@ export class Cockpit {
     B.add(flat(hGeo), M.paint, xf(0, 0, -0.06), sm.matrix); // driver-facing face ends at z = +0.018
     B.add(flat(fitUV(new THREE.ShapeGeometry(roundRect(0.178, 0.094, 0.03), 8), 0.178, 0.094)), M.sideGlass, xf(0, 0, 0.0195), sm.matrix);
     const armStart = new THREE.Vector3(0.09, -0.02, -0.035).applyMatrix4(sm.matrix);
-    B.add(flat(beamGeo(armStart, V(-0.515, -0.272, -0.905), 0.017, 10)), M.rubber);
+    B.add(flat(beamGeo(armStart, V(-0.51, -0.235, -0.86), 0.017, 10)), M.rubber); // ends behind the sail
 
     // --- white hood
     B.add(flat(this._hoodGeo()), M.paint);

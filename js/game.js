@@ -110,7 +110,7 @@ export class Game {
     this.camMode = 'fp';
     this.boom = null;
     this.skyT = this.skyLook = 0;
-    this.ui.crack.clear();
+    this.cockpit.cracks.clear();
     this.road = new Road({ seed: (Math.random() * 1e6) | 0, ...M.road });
     this.world.reset(theme, this.road);
     this.cockpit.setTheme(theme);
@@ -200,7 +200,7 @@ export class Game {
     this.input.clearTouches();
     this.ui.show(null);
     this.ui.showHud(true, this.input.mode, this.modeKey);
-    this.ui.crack.clear();
+    this.cockpit.cracks.clear();
     this.cockpit.setHoodDeer(null);
     this.fx.reset();
     this.camMode = 'fp';
@@ -251,7 +251,7 @@ export class Game {
         } else this.car.v *= 0.85;
         this.shake = 0.9;
       }
-      this.ui.crack.clear();
+      this.cockpit.cracks.clear();
       this.fx.placeWreck(this.rig);
       // pull the camera out of the driver's seat to watch the car
       this.camMode = 'chase';
@@ -374,7 +374,7 @@ export class Game {
   roadsideFx(kind) {
     this.ui.pop(kind === 'sign' ? 'CLANG!' : 'WHACK!');
     this.shake = 0.8;
-    if (kind === 'sign') this.ui.crack.add(0.7 + Math.random() * 0.1, 0.2 + Math.random() * 0.12);
+    if (kind === 'sign') this.cockpit.cracks.add(0.7 + Math.random() * 0.1, 0.2 + Math.random() * 0.12);
   }
 
   bonkFx(pos, crack) {
@@ -385,7 +385,7 @@ export class Game {
       const v = this.tmpV.copy(pos);
       v.y += 0.8;
       v.project(this.camera);
-      this.ui.crack.add(clamp(v.x * 0.5 + 0.5, 0.18, 0.82), clamp(-v.y * 0.5 + 0.5, 0.14, 0.42));
+      this.cockpit.cracks.add(clamp(v.x * 0.5 + 0.5, 0.18, 0.82), clamp(-v.y * 0.5 + 0.5, 0.14, 0.42));
     }
   }
 

@@ -30,8 +30,7 @@ html, body {
 }
 body { position: fixed; inset: 0; }
 #app { position: fixed; inset: 0; overflow: hidden; }
-#game, #crack { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-#crack { pointer-events: none; }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #touch { position: absolute; inset: 0; touch-action: none; }
 .hidden { display: none !important; }
 button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
