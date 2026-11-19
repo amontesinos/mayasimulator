@@ -19,7 +19,8 @@ function repoName() {
   return m && first ? `${m[1]}/${first}` : FALLBACK_REPO;
 }
 
-const pretty = (file) => decodeURIComponent(file).replace(/\.mp3$/i, '').replace(/[_-]+/g, ' ').trim();
+// "Ella Langley - Choosin' Texas.mp3" -> "Ella Langley - Choosin' Texas" (underscores become spaces)
+const pretty = (file) => decodeURIComponent(file).replace(/\.mp3$/i, '').replace(/_+/g, ' ').trim();
 
 export class MusicPlayer {
   constructor() {

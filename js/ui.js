@@ -100,14 +100,24 @@ export class UI {
     this.lastMid = '';
     const sign = $('t-sign');
     if (sign) paintDeerSign(sign.getContext('2d'), sign.width);
+    $('music-dock').append($('btn-music')); // the game starts on the title screen
   }
 
   show(id) {
     for (const s of this.screens) $(s).classList.toggle('hidden', s !== id);
   }
 
+  // The music button rides along: in the HUD's button row while driving, in
+  // the top-right corner dock on every menu screen (pause included).
+  placeMusic(inHud) {
+    const btn = $('btn-music');
+    const home = inHud ? document.querySelector('.hud-btns') : $('music-dock');
+    if (btn.parentElement !== home) home.prepend(btn);
+  }
+
   showHud(on, inputMode, modeKey) {
     $('hud').classList.toggle('hidden', !on);
+    this.placeMusic(on);
     if (on) {
       $('hud').dataset.input = inputMode;
       $('hud').dataset.mode = modeKey;

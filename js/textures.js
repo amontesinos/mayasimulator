@@ -67,21 +67,9 @@ export function makeRoadTexture(spec, aniso) {
     }
     g.stroke();
   }
-  // markings
-  for (const L of spec.lines) {
-    g.fillStyle = L.color;
-    const x0 = X(L.d - L.w / 2), w = Math.max(3, X(L.d + L.w / 2) - x0);
-    if (!L.dash) g.fillRect(x0, 0, w, H);
-    else {
-      const on = L.dash[0] * pym, per = (L.dash[0] + L.dash[1]) * pym;
-      for (let y = 0; y < H; y += per) g.fillRect(x0, y, w, on);
-    }
-  }
-  // worn paint
-  g.globalCompositeOperation = 'source-atop';
-  g.fillStyle = 'rgba(60,60,60,0.25)';
-  for (let k = 0; k < 900; k++) g.fillRect(Math.random() * W, Math.random() * H, 2, 2);
-  g.globalCompositeOperation = 'source-over';
+  // (lane markings are separate geometry, see World._laneLines: painted into
+  // this texture they smeared into wide streaks wherever the GPU blurs it)
+  void pym;
   const tex = canvasTexture(c, { repeatT: true, aniso });
   tex.wrapS = THREE.ClampToEdgeWrapping;
   return tex;

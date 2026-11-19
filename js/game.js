@@ -317,6 +317,7 @@ export class Game {
     this.ui.setSensitivity(this.store.data.sens);
     this.ui.setSound(this.store.data.sound);
     this.ui.show('s-pause');
+    this.ui.placeMusic(false); // in the corner, above the pause menu
     this.audio.suspend();
   }
 
@@ -327,6 +328,7 @@ export class Game {
     this.input.active = true;
     this.input.clearTouches();
     this.ui.show(null);
+    this.ui.placeMusic(true);
     this.requestWake();
   }
 

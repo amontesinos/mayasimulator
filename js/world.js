@@ -211,6 +211,8 @@ export class World {
   _initMaterials() {
     this.mats = {
       road: new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      // lane markings: 2 cm above the asphalt, nudged toward the camera in depth so they never flicker into it
+      lines: new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
       terrain: new THREE.MeshLambertMaterial({ vertexColors: true }),
       foliage: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
       trunk: new THREE.MeshLambertMaterial({ color: 0x5b4633, flatShading: true }),
@@ -529,6 +531,9 @@ export class World {
       geo.computeBoundingSphere();
       owned.push(geo);
       group.add(new THREE.Mesh(geo, this.mats.road));
+      const lines = this._laneLines(s0, n, step);
+      owned.push(lines);
+      group.add(new THREE.Mesh(lines, this.mats.lines));
     }
 
     // --- terrain on both sides
@@ -738,6 +743,55 @@ export class World {
 
     this.scene.add(group);
     return { group, owned, instanced, obstacles };
+  }
+
+  // Lane markings as thin flat strips just above the asphalt (solid lines
+  // follow the road; dashes are cut by absolute distance so they line up
+  // across chunks). As real geometry their edges stay crisp at any distance,
+  // where paint in the road texture blurred into streaks near the car on
+  // GPUs that filter it coarsely.
+  _laneLines(s0, n, step) {
+    const road = this.road, R = this.roadSpec, s1 = s0 + n * step;
+    const pos = [], nor = [], col = [], idx = [];
+    const c3 = new THREE.Color();
+    const strip = (L, a, b) => {
+      const pts = [a];
+      for (let s = Math.ceil(a / step) * step; s < b; s += step) if (s > a) pts.push(s);
+      pts.push(b);
+      c3.set(L.color); // three.js already brings hex colors into linear space
+      const base = pos.length / 3;
+      for (const s of pts) {
+        const p = road.sample(s), c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
+        const h = road.height(s) + 0.02, sl = road.slope(s), inv = 1 / Math.sqrt(1 + sl * sl);
+        for (const d of [L.d - L.w / 2, L.d + L.w / 2]) {
+          pos.push(p.x + d * c, h, p.z - d * sn);
+          nor.push(sl * sn * inv, inv, sl * c * inv);
+          col.push(c3.r, c3.g, c3.b);
+        }
+      }
+      for (let i = 0; i < pts.length - 1; i++) {
+        const q = base + i * 2;
+        idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2);
+      }
+    };
+    for (const L of R.lines) {
+      if (!L.dash) {
+        strip(L, s0, s1);
+        continue;
+      }
+      const per = L.dash[0] + L.dash[1];
+      for (let a = Math.floor(s0 / per) * per; a < s1; a += per) {
+        const lo = Math.max(a, s0), hi = Math.min(a + L.dash[0], s1);
+        if (hi > lo) strip(L, lo, hi);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    return g;
   }
 
   _ribbon(s0, n, step, dBase, profile) {
