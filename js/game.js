@@ -16,6 +16,8 @@ import { clamp, damp, lerp, smoothstep, MPH, DEG } from './util.js';
 const LIMITS = {
   twoLane: { pavedL: -4.25, pavedR: 4.25, hardL: -8.2, hardR: 8.2 },
   twoLaneCrash: { pavedL: -4.25, pavedR: 4.25, hardL: -13.8, hardR: 13.8 },
+  // Chill Cruise: guardrails 1 m past each road edge; the car bounces off them
+  twoLaneRails: { pavedL: -4.25, pavedR: 4.25, hardL: -4.8, hardR: 4.8 },
   highway: { pavedL: -9, pavedR: 9, hardL: -5.95, hardR: 7.95 },
 };
 const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
@@ -113,7 +115,9 @@ export class Game {
     this.world.reset(theme, this.road);
     this.cockpit.setTheme(theme);
     this.roadSpec = ROADS[theme.road];
-    this.limits = theme.road === 'highway' ? LIMITS.highway : M.crash ? LIMITS.twoLaneCrash : LIMITS.twoLane;
+    this.limits = theme.road === 'highway' ? LIMITS.highway
+      : theme.guardrail === 'both' ? LIMITS.twoLaneRails
+      : M.crash ? LIMITS.twoLaneCrash : LIMITS.twoLane;
     this.homeLane = theme.road === 'highway' ? 0 : this.roadSpec.lanes[this.roadSpec.lanes.length - 1];
     this.car.reset(0, this.homeLane, 12);
     this.mode = new M(this);
@@ -351,6 +355,14 @@ export class Game {
     }
   }
 
+  // Your own music started: the car radio (Chill Cruise) goes quiet.
+  radioOff() {
+    if (this.mode && this.mode.radioOff && this.state !== 'title') {
+      this.mode.radioOff();
+      if (this.state === 'playing') this.ui.setHud(this.mode.hud());
+    }
+  }
+
   toast(text, cls, ms) {
     this.ui.toast(text, cls, ms);
   }
@@ -440,7 +452,13 @@ export class Game {
       if (ob) this.knockOver(ob);
     }
     if (st === 'playing') {
-      if (car.scrape && !this.scraping) this.audio.scrape();
+      if (car.scrape && !this.scraping) {
+        // guardrails ring out with a metallic clang; anything else just scrapes
+        const rail = this.world.theme.guardrail;
+        if (rail === 'both' || (rail && car.d > 0)) this.audio.knock('sign', Math.min(1, car.v / 20));
+        this.audio.scrape();
+        this.shake = Math.max(this.shake, 0.35);
+      }
       this.scraping = car.scrape > 0;
     } else if (st === 'ending') {
       this.endT += dt;

@@ -73,7 +73,8 @@ export const THEMES = {
     terrain: { ditch: 0.3, ditchW: 3.0, riseBase: 0.05, riseVar: 0.1, bumps: 2.5, gravel: 0x958a78, grassNear: 0x86a24a, grassFar: 0x62843a, forest: 0x4d6630 },
     trees: { perSide: 70, minX: 8, maxX: 105, aspen: 0.45, clearing: 0.0, pine: [0x2f5a33, 0x3a6a35, 0x2b4f30], aspenCols: [0xf0c23a, 0xe7a52c, 0xc8c447, 0x8fae3f] },
     mountains: { far: [0x9cb0c8, 0xc4d3e4], near: [0x6f8499, 0x93a6ba], snow: true },
-    posts: true,
+    posts: false,
+    guardrail: 'both', // the car bounces off these (see LIMITS.twoLaneRails in game.js)
     signs: [['deer', 3], ['speed45', 2], ['joke', 1.5]],
   },
   // Deer Revenge: twilight interstate.
@@ -112,6 +113,9 @@ const SIGN_DEFS = {
 
 const TERRAIN_COLS = [0, 0.8, 1.8, 3.2, 5.5, 9, 14, 21, 31, 45, 64, 88, 118];
 const BARRIER = [[-0.32, -0.3], [-0.3, 0.08], [-0.12, 0.82], [0.12, 0.82], [0.3, 0.08], [0.32, -0.3]];
+// how far a pine's lowest branches reach at car height (the cone flares to 1.75 m at 1.1 m up):
+// the car stops there instead of plowing into the branches toward the trunk
+const PINE_REACH = 1.45;
 const RAIL = [[-0.06, 0.42], [-0.08, 0.6], [-0.06, 0.78], [0.0, 0.8], [0.0, 0.4], [-0.06, 0.42]];
 
 const SKY_VS = /* glsl */ `
@@ -127,7 +131,13 @@ uniform vec3 sunColor; uniform vec3 sunDir; uniform float sunSize; uniform float
 uniform float stars; uniform float clouds; uniform vec3 cloudColor; uniform float time;
 varying vec3 vDir;
 float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// sin-free hash: the classic fract(sin(dot)) one breaks into straight-edged
+// bands on phone GPUs, whose sin() loses accuracy for large inputs
+float hash2(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 float vnoise(vec2 p) {
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   float a = hash2(i), b = hash2(i + vec2(1.0, 0.0)), c = hash2(i + vec2(0.0, 1.0)), d = hash2(i + vec2(1.0, 1.0));
@@ -610,7 +620,7 @@ export class World {
         road.toWorld(s, d, tmp);
         const t = { x: tmp.x, y: this.heightAt(s, d) - 0.15, z: tmp.z, sc, sy: rand(rng, 0.9, 1.15), rot, c: pickCol };
         (isAspen ? aspens : pines).push(t);
-        if (x < reach) obstacles.push({ s, d, r: (isAspen ? 0.4 : 0.9) * sc, kind: 'tree' });
+        if (x < reach) obstacles.push({ s, d, r: (isAspen ? 0.4 : PINE_REACH) * sc, kind: 'tree' });
       }
       // a tree line just past the ditch, so the forest edge is something you can see and hit
       if (TR.line) {
@@ -622,7 +632,7 @@ export class World {
           const sc = rand(rng, 0.85, 1.35);
           const isAspen = rng() < TR.aspen;
           (isAspen ? aspens : pines).push({ x: tmp.x, y: this.heightAt(s, d) - 0.15, z: tmp.z, sc, sy: rand(rng, 0.9, 1.15), rot: rng() * 6.283, c: rng() });
-          obstacles.push({ s, d, r: (isAspen ? 0.4 : 0.9) * sc, kind: 'tree' });
+          obstacles.push({ s, d, r: (isAspen ? 0.4 : PINE_REACH) * sc, kind: 'tree' });
         }
       }
       const nRocks = 4 + Math.floor(rng() * 4);
@@ -690,15 +700,21 @@ export class World {
       owned.push(g);
       group.add(new THREE.Mesh(g, this.mats.concrete));
     }
+    // guardrail: true = right side only (highway, the barrier is on the left), 'both' = both sides
     if (T.guardrail) {
-      const g = this._ribbon(s0, n, step, R.right + 1.0, RAIL);
-      owned.push(g);
-      group.add(new THREE.Mesh(g, this.mats.metal));
       const rp = [];
-      for (let s = Math.ceil(s0 / 4) * 4; s < s0 + L; s += 4) {
-        const d = R.right + 1.06;
-        const yaw = road.toWorld(s, d, tmp);
-        rp.push({ x: tmp.x, y: this.heightAt(s, d) - 0.05, z: tmp.z, sc: 1, sy: 1, rot: yaw });
+      for (const side of T.guardrail === 'both' ? [-1, 1] : [1]) {
+        const base = side > 0 ? R.right + 1.0 : R.left - 1.0;
+        // the rail profile is built for the right side; mirror it for the left
+        const prof = side > 0 ? RAIL : RAIL.map(([x, y]) => [-x, y]);
+        const g = this._ribbon(s0, n, step, base, prof);
+        owned.push(g);
+        group.add(new THREE.Mesh(g, this.mats.metal));
+        for (let s = Math.ceil(s0 / 4) * 4; s < s0 + L; s += 4) {
+          const d = base + side * 0.06;
+          const yaw = road.toWorld(s, d, tmp);
+          rp.push({ x: tmp.x, y: this.heightAt(s, d) - 0.05, z: tmp.z, sc: 1, sy: 1, rot: yaw });
+        }
       }
       inst(this.geos.railPost, this.mats.metal, rp);
     }

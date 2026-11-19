@@ -4,6 +4,7 @@ import { Input } from './input.js';
 import { AudioEngine } from './audio.js';
 import { Game } from './game.js';
 import { MODES } from './modes.js';
+import { MusicPlayer } from './music.js';
 
 const KEY = 'maya-sim-v1';
 const $ = (id) => document.getElementById(id);
@@ -70,11 +71,23 @@ function boot() {
     game.state = 'modes';
     ui.buildModes(MODES, store.data, (k) => game.selectMode(k));
   };
+  // Music: shuffles the mp3s in the repo's music/ folder (see music.js)
+  const music = new MusicPlayer();
+  game.music = music;
+  music.setMuted(!store.data.sound);
+  music.onChange = (playing, title) => {
+    $('btn-music').classList.toggle('on', playing);
+    if (playing && title) game.toast(`🎵 ${title}`, 'tip', 2600);
+    if (playing) game.radioOff(); // one thing playing at a time
+  };
+  music.onEmpty = () => game.toast('No songs yet. Add .mp3 files to the music folder.', 'tip', 3500);
+
   const toggleSound = () => {
     store.data.sound = !store.data.sound;
     store.save();
     audio.unlock();
     audio.setMuted(!store.data.sound);
+    music.setMuted(!store.data.sound);
     ui.setSound(store.data.sound);
   };
 
@@ -93,7 +106,15 @@ function boot() {
   on('btn-again', () => game.selectMode(game.modeKey));
   on('btn-o-modes', () => openModes('over'));
   on('btn-o-menu', () => game.quitToMenu());
-  on('btn-radio', () => game.radio());
+  on('btn-radio', () => {
+    music.pause(); // switching to the car radio stops the music
+    game.radio();
+  });
+  on('btn-music', () => {
+    audio.unlock();
+    music.toggle();
+  });
+  document.addEventListener('visibilitychange', () => music.background(document.hidden));
   document.querySelectorAll('#p-sens button').forEach((b) =>
     b.addEventListener('click', () => {
       const v = Number(b.dataset.v);

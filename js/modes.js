@@ -613,11 +613,18 @@ export class ChillMode {
     this.nextS = g.car.s + 110;
     this.songIdx = Math.floor(this.rng() * 4);
     this.songT = 0;
+    if (g.music && g.music.playing) this.station = STATIONS.length; // your music is on: radio stays off
     g.audio.startRadio(this.station < STATIONS.length ? this.station : -1);
   }
 
   stop() {
     this.g.audio.stopRadio();
+  }
+
+  // Your own music started: switch the car radio off.
+  radioOff() {
+    this.station = STATIONS.length;
+    this.g.audio.startRadio(-1);
   }
 
   carParams() {
@@ -749,8 +756,13 @@ export class ChillMode {
     return {
       score: `${((car.s - this.s0) / 1609.34).toFixed(1)} mi`,
       sub: `${Math.round(car.v * MPH)} mph · deer spotted: ${this.spotted}`,
-      radio: st ? `📻 ${st.name}` : '📻 Radio off',
+      radio: this.musicTitle() ? `🎵 ${this.musicTitle()}` : st ? `📻 ${st.name}` : '📻 Radio off',
     };
+  }
+
+  musicTitle() {
+    const m = this.g.music;
+    return m && m.playing ? m.title || '…' : '';
   }
 
   drawScreen(g, w, h) {
@@ -758,6 +770,24 @@ export class ChillMode {
     screenFrame(g, w, h, 'AUDIO', '#7fd4ff');
     g.textAlign = 'left';
     g.textBaseline = 'alphabetic';
+    const song = this.musicTitle();
+    if (song) {
+      g.fillStyle = '#7fd4ff';
+      g.font = 'bold 24px Arial, sans-serif';
+      g.fillText('NOW PLAYING', 24, 96);
+      g.fillStyle = '#ffffff';
+      g.font = `44px ${COMIC_FONT}`;
+      let t = song;
+      while (t.length > 3 && g.measureText(t).width > w - 48) t = t.slice(0, -2);
+      g.fillText(t === song ? t : `${t}…`, 24, 156);
+      const tt = performance.now() / 1000;
+      for (let i = 0; i < 22; i++) {
+        const v = 0.3 + 0.7 * Math.abs(Math.sin(tt * (2 + (i % 5)) + i * 1.7));
+        g.fillStyle = i % 2 ? '#2f8cff' : '#48d1ff';
+        g.fillRect(24 + i * 21, 270 - v * 60, 15, v * 60);
+      }
+      return;
+    }
     if (!st) {
       g.fillStyle = '#5f7187';
       g.font = `56px ${COMIC_FONT}`;

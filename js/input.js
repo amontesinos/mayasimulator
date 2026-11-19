@@ -14,11 +14,22 @@ const SENS = [34, 26, 19]; // degrees of tilt for full lock: low / medium / high
 // than this (say, playing lying down) does the current hold become straight.
 const LEVEL_FALLBACK = 20 * DEG;
 
+// The browser's own report of the screen rotation, or null if it has none.
 function apiScreenAngle() {
-  let a = 0;
+  let a = null;
   if (screen.orientation && typeof screen.orientation.angle === 'number') a = screen.orientation.angle;
   else if (typeof window.orientation === 'number') a = window.orientation;
-  return ((Math.round(a / 90) * 90) % 360 + 360) % 360;
+  return a == null ? null : ((Math.round(a / 90) * 90) % 360 + 360) % 360;
+}
+const isLandscape = () => window.innerWidth > window.innerHeight;
+
+// How far the screen is turned like a wheel, from gravity's direction within
+// the screen's own plane (sx, sy). Measured as an angle in that plane it reads
+// the same however far the device is tipped back (an iPad held low and leaning
+// back used to steer only weakly). null when the device lies too flat to tell.
+function screenRoll(sx, sy) {
+  if (Math.hypot(sx, sy) < 0.12) return null;
+  return clamp(Math.atan2(-sx, Math.max(sy, 0.05)), -1.2, 1.2);
 }
 
 function toScreen(ux, uy, ang) {
@@ -58,6 +69,7 @@ export class Input {
 
     window.addEventListener('deviceorientation', (e) => this._onOrient(e));
     window.addEventListener('orientationchange', () => (this.angleOverride = null));
+    window.addEventListener('resize', () => (this.angleOverride = null));
     if (screen.orientation && screen.orientation.addEventListener) {
       screen.orientation.addEventListener('change', () => (this.angleOverride = null));
     }
@@ -102,27 +114,43 @@ export class Input {
     this.up[1] = uy;
     this.up[2] = uz;
     for (let i = 0; i < 3; i++) this.upAvg[i] += (this.up[i] - this.upAvg[i]) * 0.15;
-    const ang = this.angleOverride != null ? this.angleOverride : apiScreenAngle();
-    const [sx] = toScreen(ux, uy, ang);
-    this.roll = Math.asin(clamp(-sx, -1, 1));
+    const r = screenRoll(...toScreen(ux, uy, this._screenAngle()));
+    // lying (nearly) flat there's no wheel angle to read: ease back to straight
+    this.roll = r != null ? r : this.roll + (this.neutral - this.roll) * 0.1;
   }
 
-  // Double-check which way the screen is rotated using gravity, in case the
-  // browser reports it wrong. Needs the phone roughly upright, not flat.
+  // Which way the screen is rotated. The browser's report can't be trusted
+  // everywhere: iPadOS Safari in its default "desktop website" mode has no
+  // window.orientation (and older iPadOS no screen.orientation), so landscape
+  // read as portrait and steering followed the wrong axis. So the report must
+  // agree with the window's shape; if it doesn't (or is missing), take the
+  // rotation of that shape whose "up" matches gravity.
+  _screenAngle() {
+    if (this.angleOverride != null) {
+      // flipped 180° without the browser saying so: gravity shows the screen upside down
+      if (toScreen(this.upAvg[0], this.upAvg[1], this.angleOverride)[1] < -0.35) this.angleOverride = (this.angleOverride + 180) % 360;
+      return this.angleOverride;
+    }
+    const land = isLandscape(), api = apiScreenAngle();
+    if (api != null && (api % 180 === 90) === land) return api;
+    const [ux, uy] = this.upAvg;
+    const [a, b] = land ? [90, 270] : [0, 180];
+    const sa = toScreen(ux, uy, a)[1];
+    // hold the last pick while gravity is ambiguous (device lying flat)
+    if (Math.abs(sa) > 0.15 || this.guess == null || (this.guess % 180 === 90) !== land) this.guess = sa >= 0 ? a : b;
+    return this.guess;
+  }
+
+  // Start of a run: settle which way the screen is rotated using gravity,
+  // considering only rotations that match the window's shape.
   detectScreen() {
-    const [ux, uy, uz] = this.upAvg;
-    if (Math.abs(uz) < 0.85) {
-      let best = apiScreenAngle(), bestY = -2;
-      for (const a of [0, 90, 180, 270]) {
-        const [, sy] = toScreen(ux, uy, a);
-        if (sy > bestY + 1e-3) {
-          bestY = sy;
-          best = a;
-        }
-      }
-      this.angleOverride = best;
-      const [sx] = toScreen(ux, uy, best);
-      this.roll = Math.asin(clamp(-sx, -1, 1));
+    const [ux, uy] = this.upAvg;
+    const [a, b] = isLandscape() ? [90, 270] : [0, 180];
+    const sa = toScreen(ux, uy, a)[1];
+    if (Math.abs(sa) > 0.05) {
+      this.angleOverride = sa >= 0 ? a : b;
+      const r = screenRoll(...toScreen(ux, uy, this.angleOverride));
+      if (r != null) this.roll = r;
     }
     this.rollSmooth = this.roll;
   }
