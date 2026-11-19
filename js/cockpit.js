@@ -93,14 +93,16 @@ const bez3 = (a, b, c, d, n) =>
     return [0, 1].map((k) => u * u * u * a[k] + 3 * u * u * t * b[k] + 3 * u * t * t * c[k] + t * t * t * d[k]);
   });
 
-// Dashboard side profiles, [z, y]. The standard one runs from the windshield
-// over a gentle hump and down the face. In front of the driver the top drops
-// into a pocket so the gauges show over it (under the binnacle hood).
-const DASH_STD = [
+// Dashboard side profiles, [z, y]. The main one rises from the windshield to a
+// rounded lip near the driver, then drops down a tall, upright face (room for
+// the HR-V's tall vents and audio unit). Its top stays below the far edge's
+// sight line, so it never hides more of the hood. In front of the driver the
+// top drops into a pocket so the gauges show over it (under the binnacle hood).
+const DASH_HI = [
   [-1.02, -0.305],
-  ...bez3([-1.02, -0.305], [-0.9, -0.275], [-0.75, -0.262], [-0.66, -0.268], 10),
-  ...bez2([-0.66, -0.268], [-0.6, -0.272], [-0.585, -0.31], 6),
-  [-0.567, -0.45], [-0.56, -0.62], [-0.75, -0.78], [-1.02, -0.78],
+  ...bez3([-1.02, -0.305], [-0.92, -0.28], [-0.78, -0.252], [-0.68, -0.246], 10),
+  ...bez2([-0.68, -0.246], [-0.6, -0.244], [-0.588, -0.282], 6),
+  [-0.575, -0.36], [-0.567, -0.45], [-0.56, -0.62], [-0.75, -0.78], [-1.02, -0.78],
 ];
 const DASH_POCKET = [
   [-1.02, -0.305], [-0.9, -0.29], [-0.835, -0.292], [-0.815, -0.312], [-0.805, -0.354], [-0.72, -0.354],
@@ -205,7 +207,9 @@ export class Cockpit {
       soft: lam(0x37383f),
       pod: lam(0x0d0d0f),
       podIn: lam(0x16171a, { side: THREE.BackSide }),
-      slat: lam(0x2c2d32),
+      surround: lam(0x1b1c20), // recessed frames around the vents
+      knob: pho(0x1c1c1f, 0x777777, 60),
+      slat: lam(0x4b4d54),
       rubber: lam(0x151517),
       gunmetal: pho(0x60666e, 0x9a9a9a, 45),
       chrome: pho(0xc4cad2, 0xffffff, 90),
@@ -221,11 +225,12 @@ export class Cockpit {
     const B = new Baker();
     const V = (x, y, z) => new THREE.Vector3(x, y, z);
     const flat = (g) => ((g.userData.flat = true), g);
+    const mul = (a, b) => new THREE.Matrix4().multiplyMatrices(a, b);
     // a textured plane; glow = unlit (backlit displays)
     const decal = (parent, w, h, tex, m, opts = {}) => {
       const mat = opts.glow
         ? new THREE.MeshBasicMaterial({ map: tex, transparent: !!opts.transparent })
-        : new THREE.MeshLambertMaterial({ map: tex, alphaTest: opts.alphaTest || 0 });
+        : new THREE.MeshLambertMaterial({ map: tex, alphaTest: opts.alphaTest || 0, transparent: !!opts.transparent });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
       m.decompose(mesh.position, mesh.quaternion, mesh.scale);
       parent.add(mesh);
@@ -240,15 +245,21 @@ export class Cockpit {
       return g;
     };
 
-    // --- dashboard body: driver wing, gauge pocket, center + passenger side
-    B.add(extrudeX(DASH_STD, -0.84, -0.205), M.dash);
-    B.add(extrudeX(DASH_POCKET, -0.205, 0.205), M.dash);
-    B.add(extrudeX(DASH_STD, 0.205, 1.55), M.dash);
+    // --- dashboard body: driver wing (out to the door), gauge pocket, center + passenger side
+    B.add(extrudeX(DASH_HI, -0.47, -0.27), M.dash);
+    B.add(extrudeX(DASH_POCKET, -0.27, 0.205), M.dash);
+    B.add(extrudeX(DASH_HI, 0.205, 1.55), M.dash);
 
-    // --- binnacle hood over the gauges, closed at the back
-    const VC = -0.292, A0 = 0.09, N = 28;
-    const arc = (rx, ry, i) => {
-      const a = A0 + ((Math.PI - 2 * A0) * i) / N;
+    // --- driver's door: trim panel, padded window ledge, trim line continuing the dash's
+    B.add(new THREE.BoxGeometry(0.05, 0.5, 1.15), M.dash, xf(-0.495, -0.545, -0.25));
+    B.add(new THREE.BoxGeometry(0.08, 0.026, 1.17), M.soft, xf(-0.49, -0.297, -0.255));
+    B.add(new THREE.BoxGeometry(0.006, 0.008, 0.75), M.gunmetal, xf(-0.4675, -0.37, -0.43));
+
+    // --- binnacle hood over the gauges, closed at the back. On the left it
+    // sweeps down past the tachometer into a cheek that meets the outboard vent.
+    const VC = -0.292, A0 = 0.09, A1 = Math.PI + 0.42, N = 34;
+    const arc = (rx, ry, i, a1 = A1) => {
+      const a = A0 + ((a1 - A0) * i) / N;
       return [rx * Math.cos(a), VC + ry * Math.sin(a)];
     };
     const vis = new THREE.Shape();
@@ -263,8 +274,11 @@ export class Cockpit {
     const back = new THREE.Shape();
     back.moveTo(-0.256, -0.335);
     back.lineTo(0.256, -0.335);
-    for (let i = 0; i <= N; i++) back.lineTo(...arc(0.256, 0.138, i));
+    for (let i = 0; i <= N; i++) back.lineTo(...arc(0.256, 0.138, i, Math.PI - A0));
     B.add(new THREE.ShapeGeometry(back), M.pod, xf(0, 0, -0.835));
+
+    // round side-window demister grille on the dash top, by the A-pillar
+    decal(R, 0.1, 0.1, this._demisterTexture(), xf(-0.33, -0.2715, -0.886, -Math.PI / 2 + 0.2), { alphaTest: 0.4 });
 
     // --- gauge cluster: tach, speedo, fuel in chrome-ringed tubes
     const cl = frameOf(R, 0, -0.288, -0.768, -0.33);
@@ -323,81 +337,97 @@ export class Cockpit {
     const oval = (rt, rb, h) => new THREE.CylinderGeometry(rt, rb, h, 32).rotateX(Math.PI / 2).scale(1.14, 0.94, 1);
     W.add(oval(0.07, 0.075, 0.045), M.rubber, xf(0, -0.012, -0.014));
     W.add(oval(0.064, 0.069, 0.014), M.leather, xf(0, -0.012, 0.0145));
+    // side spokes with round, chrome-ringed button pods (audio left, cruise right)
     for (const sx of [-1, 1]) {
       W.add(new THREE.BoxGeometry(0.105, 0.046, 0.024), M.leather, xf(sx * 0.128, -0.018, -0.002));
       W.add(new THREE.BoxGeometry(0.096, 0.0055, 0.027), M.chrome, xf(sx * 0.131, 0.0055, -0.002));
+      W.add(new THREE.TorusGeometry(0.0205, 0.0022, 6, 36), M.chrome, xf(sx * 0.112, -0.019, 0.0105));
     }
-    W.add(new THREE.BoxGeometry(0.034, 0.1, 0.02), M.leather, xf(0, -0.128, -0.004));
-    W.add(new THREE.BoxGeometry(0.009, 0.072, 0.022), M.chrome, xf(0, -0.128, -0.004));
+    // lower spoke: a piano-black V outlined in chrome
+    for (const sx of [-1, 1]) {
+      W.add(new THREE.BoxGeometry(0.026, 0.121, 0.018), M.piano, xf(sx * 0.032, -0.115, -0.003, 0, 0, -sx * 0.337));
+      W.add(new THREE.BoxGeometry(0.004, 0.121, 0.02), M.chrome, xf(sx * 0.0462, -0.12, -0.003, 0, 0, -sx * 0.337));
+    }
     W.build(spin, null);
-    decal(spin, 0.054, 0.034, this._spokeTexture(['VOL+', 'MODE', 'VOL-', 'SRC']), xf(-0.113, -0.018, 0.0105));
-    decal(spin, 0.054, 0.034, this._spokeTexture(['RES+', 'MAIN', 'SET-', 'CNCL']), xf(0.113, -0.018, 0.0105));
-    decal(spin, 0.038, 0.031, this._emblemTexture(), xf(0, -0.008, 0.022), { alphaTest: 0.4 });
+    decal(spin, 0.039, 0.039, this._podTexture('audio'), xf(-0.112, -0.019, 0.0108), { alphaTest: 0.3 });
+    decal(spin, 0.039, 0.039, this._podTexture('cruise'), xf(0.112, -0.019, 0.0108), { alphaTest: 0.3 });
+    decal(spin, 0.05, 0.04, this._emblemTexture(), xf(0, -0.006, 0.022), { alphaTest: 0.4 });
 
-    // steering column with the turn-signal and wiper stalks
+    // steering column; the light and wiper stalks show through the wheel, under the outer dials
     B.add(beamGeo(V(0, -0.37, -0.56), V(0, -0.47, -0.78), 0.05, 12), M.rubber);
     for (const sx of [-1, 1]) {
-      B.add(beamGeo(V(sx * 0.045, -0.352, -0.588), V(sx * 0.2, -0.345, -0.58), 0.0065, 8), M.rubber);
-      B.add(beamGeo(V(sx * 0.17, -0.3458, -0.5815), V(sx * 0.215, -0.3445, -0.5795), 0.0095, 10), M.rubber);
+      B.add(beamGeo(V(sx * 0.03, -0.333, -0.612), V(sx * 0.12, -0.318, -0.614), 0.0058, 8), M.rubber);
+      B.add(beamGeo(V(sx * 0.112, -0.3193, -0.6138), V(sx * 0.128, -0.3167, -0.6142), 0.0088, 10), M.gunmetal); // switch collar
+      B.add(beamGeo(V(sx * 0.127, -0.3168, -0.6142), V(sx * 0.15, -0.313, -0.6146), 0.0082, 10), M.rubber);
     }
 
-    // --- center stack, angled toward the driver: screen, vents, hazard button
-    // (it stands proud of the dash face so its tilted top corner clears the dash's rounded lip)
-    const cs = frameOf(R, CAR_X + 0.012, -0.352, -0.555, -0.2, -0.1, 0, 'YXZ');
+    // --- driver side, as in the HR-V: a tall outboard vent in a dark surround
+    // right beside the wheel, a trim slot under it, then the ECON/VSA/TPMS buttons
+    const ov = xf(-0.322, -0.336, -0.574, -0.16, 0.22, 0, 'YXZ');
+    this._vent(B, 0.08, 0.104, ov, [0.11, 0.13]);
+    B.add(new THREE.BoxGeometry(0.085, 0.006, 0.01), M.gunmetal, mul(ov, xf(0, -0.076, 0)));
+    const ec = xf(-0.318, -0.447, -0.564, -0.12, 0.22, 0, 'YXZ');
+    B.add(new THREE.BoxGeometry(0.056, 0.052, 0.01), M.piano, ec);
+    decal(R, 0.052, 0.048, this._econTexture(), mul(ec, xf(0, 0, 0.0052)));
+
+    // --- center: tall vents either side of the audio unit, hazard button under the left one
+    this._vent(B, 0.064, 0.1, xf(0.25, -0.33, -0.574, -0.16, -0.12, 0, 'YXZ'), [0.084, 0.124]);
+    this._vent(B, 0.064, 0.1, xf(0.626, -0.33, -0.576, -0.16, -0.05, 0, 'YXZ'), [0.084, 0.124]);
+    const hz = xf(0.25, -0.41, -0.571, -0.16, -0.12, 0, 'YXZ');
+    B.add(new THREE.BoxGeometry(0.034, 0.017, 0.008), M.piano, hz);
+    decal(R, 0.03, 0.015, this._hazardTexture(), mul(hz, xf(0, 0, 0.0042)));
+
+    // audio unit: screen framed by buttons, volume and select knobs, presets below
+    const au = frameOf(R, 0.437, -0.336, -0.556, -0.18, -0.08, 0, 'YXZ');
     B.add(
-      new THREE.ExtrudeGeometry(roundRect(0.42, 0.178, 0.03), { depth: 0.06, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 6 }),
-      M.dash, xf(0, 0, -0.066), cs.matrix,
+      new THREE.ExtrudeGeometry(roundRect(0.27, 0.16, 0.02), { depth: 0.05, bevelEnabled: true, bevelThickness: 0.005, bevelSize: 0.005, bevelSegments: 2, curveSegments: 6 }),
+      M.dash, xf(0, 0, -0.055), au.matrix,
     );
-    B.add(new THREE.ShapeGeometry(roundRect(0.404, 0.162, 0.024), 6), M.piano, xf(0, 0, 0.0012), cs.matrix);
+    B.add(new THREE.ShapeGeometry(roundRect(0.262, 0.152, 0.016), 6), M.piano, xf(0, 0, 0.0012), au.matrix);
+    decal(au, 0.262, 0.152, this._faceplateTexture(), xf(0, 0, 0.0018), { alphaTest: 0.3 });
     const [sc, sg] = makeCanvas(512, 288);
     this.screenCanvas = sc;
     this.screenCtx = sg;
     this.screenTex = canvasTexture(sc);
-    decal(cs, 0.172, 0.0968, this.screenTex, xf(0.016, 0.016, 0.0024), { glow: true });
-    decal(cs, 0.018, 0.09, this._buttonStripTexture(), xf(-0.088, 0.016, 0.0024), { glow: true, transparent: true });
-    for (const sx of [-1, 1]) this._vent(B, 0.05, 0.094, xf(sx * 0.172, 0.01, 0.0015), cs.matrix);
-    B.add(new THREE.BoxGeometry(0.36, 0.0035, 0.003), M.chrome, xf(0, -0.046, 0.0028), cs.matrix);
-    B.add(new THREE.BoxGeometry(0.036, 0.018, 0.008), M.piano, xf(0, -0.066, 0.004), cs.matrix);
-    decal(cs, 0.03, 0.015, this._hazardTexture(), xf(0, -0.066, 0.0082));
+    decal(au, 0.16, 0.09, this.screenTex, xf(0.004, 0.014, 0.0026), { glow: true });
+    const knobTex = this._knobTexture();
+    const knob = (frame, x, y, r) => {
+      B.add(new THREE.TorusGeometry(r + 0.003, 0.0018, 6, 36), M.chrome, xf(x, y, 0.003), frame.matrix);
+      B.add(new THREE.CylinderGeometry(r, r + 0.001, 0.012, 32).rotateX(Math.PI / 2), M.knob, xf(x, y, 0.0072), frame.matrix);
+      decal(frame, r * 2, r * 2, knobTex, xf(x, y, 0.0134), { alphaTest: 0.3 });
+    };
+    knob(au, -0.106, -0.045, 0.0108);
+    knob(au, 0.108, -0.045, 0.0108);
 
-    // climate control touch panel below it
-    const cp = frameOf(R, CAR_X + 0.012, -0.49, -0.538, -0.08, -0.1, 0, 'YXZ');
+    // climate controls below: temperature, fan speed and mode knobs, A/C button
+    const cp = frameOf(R, 0.437, -0.485, -0.54, -0.1, -0.08, 0, 'YXZ');
     B.add(
-      new THREE.ExtrudeGeometry(roundRect(0.37, 0.085, 0.02), { depth: 0.05, bevelEnabled: true, bevelThickness: 0.005, bevelSize: 0.005, bevelSegments: 2, curveSegments: 5 }),
+      new THREE.ExtrudeGeometry(roundRect(0.3, 0.095, 0.03), { depth: 0.05, bevelEnabled: true, bevelThickness: 0.005, bevelSize: 0.005, bevelSegments: 2, curveSegments: 6 }),
       M.dash, xf(0, 0, -0.055), cp.matrix,
     );
-    B.add(new THREE.ShapeGeometry(roundRect(0.358, 0.074, 0.016), 5), M.piano, xf(0, 0, 0.0012), cp.matrix);
-    decal(cp, 0.33, 0.064, this._climateTexture(), xf(0, 0, 0.0022), { glow: true });
+    B.add(new THREE.ShapeGeometry(roundRect(0.29, 0.085, 0.026), 6), M.piano, xf(0, 0, 0.0012), cp.matrix);
+    decal(cp, 0.286, 0.082, this._climatePanelTexture(), xf(0, 0, 0.0018), { transparent: true });
+    knob(cp, -0.092, 0.008, 0.019);
+    knob(cp, 0, 0.008, 0.015);
+    knob(cp, 0.092, 0.008, 0.019);
 
-    // push-button start, right of the column
-    const sb = frameOf(R, 0.17, -0.468, -0.565, -0.12, 0.3, 0, 'YXZ');
-    B.add(new THREE.CylinderGeometry(0.02, 0.021, 0.01, 28).rotateX(Math.PI / 2), M.chrome, sb.matrix);
-    decal(sb, 0.034, 0.034, this._startTexture(), xf(0, 0, 0.0052), { alphaTest: 0.3 });
-
-    // --- driver side: outboard vent, trim strip, switch panel
-    this._vent(B, 0.125, 0.068, xf(-0.47, -0.33, -0.577, -0.12, 0.15, 0, 'YXZ'));
-    B.add(new THREE.BoxGeometry(0.56, 0.008, 0.012), M.gunmetal, xf(-0.5, -0.374, -0.574));
-    B.add(new THREE.BoxGeometry(0.11, 0.036, 0.012), M.piano, xf(-0.33, -0.42, -0.571));
-    decal(R, 0.104, 0.03, this._switchTexture(), xf(-0.33, -0.42, -0.5648));
-
-    // --- passenger side: stitched soft panel, trim strip, vent, glovebox
-    B.add(new THREE.BoxGeometry(0.66, 0.056, 0.016), M.soft, xf(0.93, -0.338, -0.576));
-    decal(R, 0.66, 0.004, this._stitchTexture(), xf(0.93, -0.3135, -0.5675), { alphaTest: 0.3 });
-    B.add(new THREE.BoxGeometry(0.66, 0.01, 0.012), M.gunmetal, xf(0.93, -0.373, -0.574));
-    this._vent(B, 0.13, 0.068, xf(1.33, -0.335, -0.577, -0.12, -0.15, 0, 'YXZ'));
+    // --- passenger side: stitched soft panel, trim strip, tall vent, glovebox
+    B.add(new THREE.BoxGeometry(0.555, 0.056, 0.016), M.soft, xf(0.9575, -0.315, -0.575));
+    decal(R, 0.555, 0.004, this._stitchTexture(), xf(0.9575, -0.29, -0.5665), { alphaTest: 0.3 });
+    B.add(new THREE.BoxGeometry(0.555, 0.01, 0.012), M.gunmetal, xf(0.9575, -0.352, -0.573));
+    this._vent(B, 0.08, 0.104, xf(1.3, -0.334, -0.575, -0.16, -0.25, 0, 'YXZ'), [0.11, 0.13]);
     B.add(new THREE.BoxGeometry(0.46, 0.12, 0.008), M.soft, xf(1.0, -0.51, -0.562));
     B.add(new THREE.BoxGeometry(0.07, 0.012, 0.008), M.chrome, xf(1.0, -0.457, -0.557));
 
-    // --- pillars, headliner with sun visors, windshield frit band, door sill
+    // --- pillars, headliner with sun visors, windshield frit band
     B.add(beamGeo(V(-0.44, -0.31, -1.0), V(-0.68, 0.21, -0.45), 0.05), M.pillar);
     B.add(beamGeo(V(CAR_X + 0.81, -0.31, -1.0), V(CAR_X + 1.05, 0.21, -0.45), 0.05), M.pillar);
-    B.add(new THREE.BoxGeometry(2.3, 0.03, 1.0), M.headliner, xf(CAR_X, 0.215, 0.04));
+    B.add(new THREE.BoxGeometry(2.05, 0.03, 1.0), M.headliner, xf(0.49, 0.215, 0.04));
     for (const x of [-0.165, 0.905]) {
       const visor = new THREE.ExtrudeGeometry(roundRect(0.57, 0.18, 0.035), { depth: 0.022, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 2 });
       B.add(visor, M.headliner, xf(x, 0.2, -0.36, Math.PI / 2));
     }
     B.add(flat(new THREE.PlaneGeometry(2.2, 0.06)), M.frit, xf(CAR_X, 0.197, -0.47, 0.845));
-    B.add(new THREE.BoxGeometry(0.12, 0.06, 1.4), M.dash, xf(-0.8, -0.33, -0.35));
 
     // --- rear-view mirror (shows a live render of the road behind)
     const mg = frameOf(R, CAR_X, 0.11, -0.6, 0.08, -0.45, 0, 'YXZ');
@@ -429,20 +459,27 @@ export class Cockpit {
     B.build(R, (x, y) => 0.36 + 0.64 * smoothstep(-0.62, -0.27, y));
   }
 
-  // Rounded air vent: chrome bezel, dark throat, angled louvers, adjuster tab.
-  _vent(B, w, h, ...frames) {
+  // Rounded air vent set in a darker raised surround (sw x sh, with a hole for
+  // the vent): chrome bezel, dark throat, angled louvers, adjuster tab.
+  _vent(B, w, h, frame, [sw, sh]) {
     const M = this.M;
     const r = Math.min(w, h) * 0.32;
+    const sur = roundRect(sw, sh, Math.min(sw, sh) * 0.3);
+    sur.holes.push(roundRect(w - 0.004, h - 0.004, r * 0.9, new THREE.Path()));
+    B.add(
+      new THREE.ExtrudeGeometry(sur, { depth: 0.016, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 2, curveSegments: 6 }),
+      M.surround, xf(0, 0, -0.018), frame,
+    );
     const rim = roundRect(w, h, r);
     rim.holes.push(roundRect(w - 0.009, h - 0.009, r * 0.75, new THREE.Path()));
-    B.add(new THREE.ExtrudeGeometry(rim, { depth: 0.004, bevelEnabled: true, bevelThickness: 0.002, bevelSize: 0.0015, bevelSegments: 1, curveSegments: 5 }), M.chrome, ...frames);
-    B.add(new THREE.ShapeGeometry(roundRect(w - 0.008, h - 0.008, r * 0.75), 5), M.black, xf(0, 0, -0.008), ...frames);
-    const n = Math.max(3, Math.round(h / 0.018));
+    B.add(new THREE.ExtrudeGeometry(rim, { depth: 0.004, bevelEnabled: true, bevelThickness: 0.002, bevelSize: 0.0015, bevelSegments: 1, curveSegments: 5 }), M.chrome, xf(0, 0, 0.001), frame);
+    B.add(new THREE.ShapeGeometry(roundRect(w - 0.008, h - 0.008, r * 0.75), 5), M.black, xf(0, 0, -0.012), frame);
+    const n = Math.max(3, Math.round(h / 0.017));
     for (let i = 0; i < n; i++) {
       const y = -h / 2 + 0.006 + ((h - 0.012) * (i + 0.5)) / n;
-      B.add(new THREE.BoxGeometry(w - 0.012, 0.0035, 0.011), M.slat, xf(0, y, -0.002, -0.4), ...frames);
+      B.add(new THREE.BoxGeometry(w - 0.012, 0.0035, 0.011), M.slat, xf(0, y, -0.004, -0.4), frame);
     }
-    B.add(new THREE.BoxGeometry(0.008, 0.012, 0.012), M.chrome, xf(0, 0, 0.002), ...frames);
+    B.add(new THREE.BoxGeometry(0.008, 0.012, 0.012), M.chrome, xf(0, 0, 0.001), frame);
   }
 
   _hoodGeo() {
@@ -570,75 +607,84 @@ export class Cockpit {
     return canvasTexture(c);
   }
 
-  _buttonStripTexture() {
-    const [c, g] = makeCanvas(32, 160);
-    g.strokeStyle = 'rgba(210,225,255,0.75)';
-    g.fillStyle = 'rgba(210,225,255,0.75)';
+  // Round four-way button pad on a steering-wheel spoke (the chrome ring is 3D).
+  _podTexture(kind) {
+    const [c, g] = makeCanvas(128, 128);
+    const grd = g.createRadialGradient(64, 54, 6, 64, 64, 62);
+    grd.addColorStop(0, '#2e2f35');
+    grd.addColorStop(1, '#131316');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(64, 64, 62, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.65)';
     g.lineWidth = 3;
-    // power, home, menu, back glyphs
+    for (const a of [45, 135, 225, 315]) {
+      const r = a * DEG;
+      g.beginPath();
+      g.moveTo(64 + Math.cos(r) * 27, 64 + Math.sin(r) * 27);
+      g.lineTo(64 + Math.cos(r) * 61, 64 + Math.sin(r) * 61);
+      g.stroke();
+    }
+    g.fillStyle = '#1c1d21';
     g.beginPath();
-    g.arc(16, 22, 8, -1.1, 4.2);
-    g.moveTo(16, 10);
-    g.lineTo(16, 20);
-    g.stroke();
-    g.beginPath();
-    g.moveTo(7, 64);
-    g.lineTo(16, 55);
-    g.lineTo(25, 64);
-    g.moveTo(10, 62);
-    g.lineTo(10, 72);
-    g.lineTo(22, 72);
-    g.lineTo(22, 62);
-    g.stroke();
-    for (let i = 0; i < 3; i++) g.fillRect(8, 96 + i * 7, 16, 3);
-    g.beginPath();
-    g.moveTo(24, 140);
-    g.lineTo(10, 140);
-    g.moveTo(15, 134);
-    g.lineTo(9, 140);
-    g.lineTo(15, 146);
-    g.stroke();
-    return canvasTexture(c);
-  }
-
-  // Four buttons in a silver-rimmed panel on a steering-wheel spoke.
-  _spokeTexture(labels) {
-    const [c, g] = makeCanvas(160, 100);
-    g.fillStyle = '#9ea4ac';
-    rr(g, 0, 0, 160, 100, 18);
+    g.arc(64, 64, 25, 0, Math.PI * 2);
     g.fill();
-    g.fillStyle = '#0d0d10';
-    rr(g, 5, 5, 150, 90, 14);
-    g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.2)';
+    g.lineWidth = 2;
+    g.stroke();
+    g.fillStyle = '#eef2f7';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = `bold 17px ${FONT}`;
-    labels.forEach((t, i) => {
-      const x = 12 + (i % 2) * 72, y = 13 + Math.floor(i / 2) * 39;
-      g.fillStyle = '#2a2b31';
-      rr(g, x, y, 64, 33, 9);
+    const tri = (x, y, dir) => {
+      g.beginPath();
+      g.moveTo(x + dir * 7, y);
+      g.lineTo(x - dir * 5, y - 7);
+      g.lineTo(x - dir * 5, y + 7);
+      g.closePath();
       g.fill();
-      g.fillStyle = '#eef2f7';
-      g.fillText(t, x + 32, y + 17.5);
-    });
+    };
+    if (kind === 'audio') {
+      g.font = `bold 12px ${FONT}`;
+      g.fillText('SOURCE', 64, 65);
+      g.font = `bold 26px ${FONT}`;
+      g.fillText('+', 64, 23);
+      g.fillText('–', 64, 104);
+      tri(22, 64, -1);
+      tri(106, 64, 1);
+    } else {
+      g.font = `bold 11px ${FONT}`;
+      g.fillText('CANCEL', 64, 65);
+      g.font = `bold 15px ${FONT}`;
+      g.fillText('RES +', 64, 24);
+      g.fillText('SET –', 64, 104);
+    }
     return canvasTexture(c);
   }
 
-  // Chrome "H": legs flare out toward the top.
+  // Chrome "H" (legs flare out toward the top) in a chrome rounded-square frame.
   _emblemTexture() {
-    const [c, g] = makeCanvas(128, 104);
-    const grd = g.createLinearGradient(0, 0, 0, 104);
+    const [c, g] = makeCanvas(160, 128);
+    const grd = g.createLinearGradient(0, 0, 0, 128);
     grd.addColorStop(0, '#ffffff');
     grd.addColorStop(0.48, '#aeb6c0');
     grd.addColorStop(0.52, '#7c8490');
     grd.addColorStop(1, '#e8ecf1');
+    g.strokeStyle = grd;
+    g.lineWidth = 8;
+    rr(g, 6, 6, 148, 116, 30);
+    g.stroke();
     g.fillStyle = grd;
     g.beginPath();
     const pts = [[10, 8], [40, 8], [42, 40], [86, 40], [88, 8], [118, 8], [104, 96], [80, 96], [83, 62], [45, 62], [48, 96], [24, 96]];
-    pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    pts.forEach(([x, y], i) => {
+      const px = 28 + x * 0.81, py = 25 + y * 0.81;
+      if (i) g.lineTo(px, py);
+      else g.moveTo(px, py);
+    });
     g.closePath();
     g.fill();
-    g.lineWidth = 3;
+    g.lineWidth = 2.5;
     g.strokeStyle = 'rgba(30,32,36,0.6)';
     g.stroke();
     return canvasTexture(c);
@@ -660,29 +706,121 @@ export class Cockpit {
     return canvasTexture(c);
   }
 
-  _climateTexture() {
-    const [c, g] = makeCanvas(640, 124);
-    g.fillStyle = '#08090b';
-    g.fillRect(0, 0, 640, 124);
+  // Audio unit face (0.262 x 0.152 m): buttons and labels around the screen,
+  // which is a separate live texture laid on top; the two knobs are 3D.
+  _faceplateTexture() {
+    const W = 524, H = 304, S = 2000;
+    const [c, g] = makeCanvas(W, H);
+    const X = (x) => W / 2 + x * S, Y = (y) => H / 2 - y * S;
+    g.fillStyle = '#0b0b0d';
+    rr(g, 2, 2, W - 4, H - 4, 26);
+    g.fill();
+    g.strokeStyle = 'rgba(150,156,166,0.5)';
+    g.lineWidth = 3;
+    rr(g, 3, 3, W - 6, H - 6, 26);
+    g.stroke();
+    g.fillStyle = '#000';
+    g.fillRect(X(-0.082), Y(0.063), 0.172 * S, 0.098 * S);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillStyle = '#e9f4ff';
-    g.font = `bold 50px ${FONT}`;
-    g.fillText('72°', 84, 58);
-    g.fillText('72°', 556, 58);
-    g.fillStyle = '#7fd4ff';
-    g.font = `bold 26px ${FONT}`;
-    g.fillText('AUTO', 320, 32);
-    for (let i = 0; i < 7; i++) {
-      g.fillStyle = i < 3 ? '#e9f4ff' : '#2b3038';
-      g.fillRect(254 + i * 19, 84 - (14 + i * 3), 13, 14 + i * 3);
+    const btn = (x, y, w, h, label, px) => {
+      g.fillStyle = '#25262b';
+      rr(g, X(x) - (w * S) / 2, Y(y) - (h * S) / 2, w * S, h * S, 7);
+      g.fill();
+      g.strokeStyle = 'rgba(255,255,255,0.13)';
+      g.lineWidth = 1.5;
+      g.stroke();
+      g.fillStyle = '#e8ecf2';
+      g.font = `bold ${px}px ${FONT}`;
+      g.fillText(label, X(x), Y(y) + 1);
+    };
+    btn(-0.106, 0.064, 0.03, 0.012, '•  •', 12);
+    btn(0.108, 0.064, 0.03, 0.012, '▲', 11);
+    btn(-0.106, 0.042, 0.036, 0.02, 'RADIO', 12);
+    btn(-0.106, 0.017, 0.036, 0.02, 'CD/AUX', 11);
+    btn(0.108, 0.042, 0.034, 0.02, '☎', 17);
+    btn(0.108, 0.017, 0.034, 0.02, '♪', 17);
+    btn(-0.106, -0.066, 0.036, 0.012, '◂◂  ▸▸', 11);
+    btn(0.108, -0.066, 0.034, 0.012, 'MENU', 11);
+    for (let i = 0; i < 6; i++) btn(-0.0685 + i * 0.0274, -0.052, 0.024, 0.016, String(i + 1), 15);
+    g.fillStyle = '#9aa3ad';
+    g.font = `bold 11px ${FONT}`;
+    g.fillText('VOL', X(-0.106), Y(-0.024));
+    g.fillText('SELECT', X(0.108), Y(-0.024));
+    return canvasTexture(c);
+  }
+
+  // Printed around the climate knobs (0.286 x 0.082 m): blue-to-red
+  // temperature scale, fan speeds, vent modes, plus the A/C and recirc buttons.
+  _climatePanelTexture() {
+    const W = 572, H = 164, S = 2000;
+    const [c, g] = makeCanvas(W, H);
+    const X = (x) => W / 2 + x * S, Y = (y) => H / 2 - y * S;
+    const ky = Y(0.008);
+    const tx = X(-0.092);
+    for (let i = 0; i < 24; i++) {
+      const t = i / 23;
+      g.strokeStyle = `rgb(${Math.round(60 + 195 * t)},${Math.round(120 - 70 * t)},${Math.round(255 - 215 * t)})`;
+      g.lineWidth = 6;
+      g.beginPath();
+      g.arc(tx, ky, 60, (135 + i * 11.25) * DEG, (135 + (i + 1) * 11.25 + 0.5) * DEG);
+      g.stroke();
     }
-    g.fillStyle = '#9aa4ae';
-    g.font = `bold 17px ${FONT}`;
-    ['A/C', 'SYNC', 'MODE', 'OFF'].forEach((t, i) => g.fillText(t, 190 + i * 87, 108));
-    g.fillStyle = '#20242a';
-    g.fillRect(170, 12, 2, 100);
-    g.fillRect(468, 12, 2, 100);
+    g.fillStyle = '#e8ecf2';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const fx = X(0);
+    [['OFF', 205], ['1', 238], ['2', 270], ['3', 302], ['4', 335]].forEach(([t, a]) => {
+      g.font = `bold ${t === 'OFF' ? 11 : 15}px ${FONT}`;
+      g.fillText(t, fx + Math.cos(a * DEG) * 54, ky + Math.sin(a * DEG) * 54);
+    });
+    const mx = X(0.092);
+    g.strokeStyle = '#e8ecf2';
+    g.lineWidth = 2.5;
+    for (const a of [205, 245, 295, 335]) {
+      const px = mx + Math.cos(a * DEG) * 60, py = ky + Math.sin(a * DEG) * 60;
+      g.beginPath();
+      g.arc(px, py, 4.5, 0, Math.PI * 2);
+      g.stroke();
+    }
+    for (const [x, label] of [[-0.092, 'A/C'], [0.092, '⟲']]) {
+      g.fillStyle = '#25262b';
+      rr(g, X(x) - 34, Y(-0.031) - 11, 68, 22, 6);
+      g.fill();
+      g.fillStyle = '#e8ecf2';
+      g.font = `bold 14px ${FONT}`;
+      g.fillText(label, X(x), Y(-0.031) + 1);
+    }
+    g.fillStyle = '#ffb020';
+    g.fillRect(X(-0.092) + 20, Y(-0.031) - 3, 7, 6);
+    return canvasTexture(c);
+  }
+
+  // Top face of a knob: dark, ribbed edge, white pointer.
+  _knobTexture() {
+    const [c, g] = makeCanvas(64, 64);
+    const grd = g.createRadialGradient(28, 26, 2, 32, 32, 31);
+    grd.addColorStop(0, '#34353b');
+    grd.addColorStop(1, '#101013');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(32, 32, 31, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.14)';
+    g.lineWidth = 1.5;
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      g.beginPath();
+      g.moveTo(32 + Math.cos(a) * 25, 32 + Math.sin(a) * 25);
+      g.lineTo(32 + Math.cos(a) * 30, 32 + Math.sin(a) * 30);
+      g.stroke();
+    }
+    g.strokeStyle = '#f2f4f7';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.moveTo(32, 8);
+    g.lineTo(32, 22);
+    g.stroke();
     return canvasTexture(c);
   }
 
@@ -718,43 +856,56 @@ export class Cockpit {
     return t;
   }
 
-  _switchTexture() {
-    const [c, g] = makeCanvas(256, 74);
-    g.fillStyle = '#0c0c0e';
-    g.fillRect(0, 0, 256, 74);
+  // Driver's switch panel: round ECON button with a green leaf, VSA and TPMS below.
+  _econTexture() {
+    const [c, g] = makeCanvas(104, 96);
+    g.fillStyle = '#0e0e10';
+    g.fillRect(0, 0, 104, 96);
+    g.fillStyle = '#26272c';
+    g.beginPath();
+    g.arc(52, 27, 21, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#7b818a';
+    g.lineWidth = 2;
+    g.stroke();
+    g.fillStyle = '#4cd964';
+    g.beginPath();
+    g.ellipse(52, 22, 5, 9, 0.6, 0, Math.PI * 2);
+    g.fill();
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = `bold 20px ${FONT}`;
-    [['ECON', '#56f07a'], ['VSA', '#eef2f7'], ['TPMS', '#eef2f7']].forEach(([t, col], i) => {
-      const x = 8 + i * 83;
-      g.fillStyle = '#25262b';
-      rr(g, x, 9, 74, 56, 10);
+    g.font = `bold 9px ${FONT}`;
+    g.fillText('ECON', 52, 38);
+    for (const [x, label] of [[28, 'VSA'], [76, 'TPMS']]) {
+      g.fillStyle = '#26272c';
+      rr(g, x - 21, 57, 42, 32, 6);
       g.fill();
-      g.fillStyle = col;
-      g.fillText(t, x + 37, 37);
-    });
+      g.fillStyle = '#e6eaef';
+      g.font = `bold 11px ${FONT}`;
+      g.fillText(label, x, 74);
+    }
     return canvasTexture(c);
   }
 
-  _startTexture() {
+  // Round demister grille: concentric slots in a dark disc.
+  _demisterTexture() {
     const [c, g] = makeCanvas(128, 128);
-    g.fillStyle = '#121215';
+    g.fillStyle = '#1b1c20';
     g.beginPath();
-    g.arc(64, 64, 60, 0, Math.PI * 2);
+    g.arc(64, 64, 62, 0, Math.PI * 2);
     g.fill();
-    g.strokeStyle = '#d0302a';
-    g.lineWidth = 6;
+    g.strokeStyle = '#070708';
+    g.lineWidth = 5;
+    for (let r = 12; r < 56; r += 9) {
+      g.beginPath();
+      g.arc(64, 64, r, 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.strokeStyle = '#3b3c42';
+    g.lineWidth = 4;
     g.beginPath();
-    g.arc(64, 64, 50, 0, Math.PI * 2);
+    g.arc(64, 64, 59, 0, Math.PI * 2);
     g.stroke();
-    g.fillStyle = '#eef2f7';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.font = `bold 15px ${FONT}`;
-    g.fillText('ENGINE', 64, 46);
-    g.font = `bold 19px ${FONT}`;
-    g.fillText('START', 64, 66);
-    g.fillText('STOP', 64, 85);
     return canvasTexture(c);
   }
 
