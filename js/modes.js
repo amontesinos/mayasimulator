@@ -402,6 +402,24 @@ export class DodgeMode {
     }
   }
 
+  // Knocking over a sign or marker post costs one heart; losing the last one
+  // that way blows the car up like any other crash. A short grace period
+  // after a hit keeps two posts in a row from costing two hearts.
+  hitRoadside(ob) {
+    const g = this.g;
+    if (this.invuln > 0) return;
+    this.lives--;
+    this.combo = 0;
+    if (this.lives <= 0) {
+      g.crash(ob.kind, ob);
+      return;
+    }
+    this.invuln = 1.5;
+    g.car.v *= 0.7;
+    g.ui.setHud(this.hud());
+    g.roadsideFx(ob.kind);
+  }
+
   // Earliest time the game-over card may appear: after the twinkle has played.
   endHold() {
     if (!this.blasted) return 0;
@@ -439,7 +457,7 @@ export class DodgeMode {
     this.cruise = Math.min(33, 20 + this.level * 1.7);
     if (!this.offTip && car.offroad > 0.3) {
       this.offTip = true;
-      g.toast("Careful! Hit anything off the road and it's KABOOM 💥", 'warn', 2800);
+      g.toast('Careful! Trees and rocks off the road mean KABOOM 💥', 'warn', 2800);
     }
     while (car.s + 230 > this.nextS) {
       this.spawnEvent(this.nextS);

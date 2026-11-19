@@ -355,6 +355,14 @@ export class Game {
     this.ui.toast(text, cls, ms);
   }
 
+  // Feedback for knocking over a sign or post that cost a heart (the clang or
+  // thwack itself plays when it falls). A sign panel can catch the windshield.
+  roadsideFx(kind) {
+    this.ui.pop(kind === 'sign' ? 'CLANG!' : 'WHACK!');
+    this.shake = 0.8;
+    if (kind === 'sign') this.ui.crack.add(0.7 + Math.random() * 0.1, 0.2 + Math.random() * 0.12);
+  }
+
   bonkFx(pos, crack) {
     this.audio.bonk();
     this.ui.pop('BONK!');
@@ -417,7 +425,12 @@ export class Game {
           ob = this.world.hitObstacle(car.s, car.d, CAR_HALF_L, CAR_HALF_W);
           if (ob) kind = ob.kind;
         }
-        if (kind) this.crash(kind, ob);
+        if (kind) {
+          // Signs and marker posts cost a heart where there are hearts (Deer Dodge);
+          // anything else off the road is a crash.
+          if (BREAKABLE.has(kind) && M.hitRoadside) M.hitRoadside(ob);
+          else this.crash(kind, ob);
+        }
       }
     }
     // Signs and marker posts the car runs into get knocked over, in every mode
